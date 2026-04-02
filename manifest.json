@@ -1,0 +1,4 @@
+{
+  "permissions": ["storage", "activeTab", "scripting", "sidePanel", "tabs"],
+  "host_permissions": ["<all_urls>"]
+}

@@ -33,3 +33,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true // 异步响应
   }
 })
+
+// 处理来自 Content Script 的脚本执行请求
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === "EXECUTE_IN_MAIN") {
+    const tabId = sender.tab?.id
+    if (!tabId) {
+      sendResponse({ error: "No tab found" })
+      return
+    }
+    chrome.scripting
+      .executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: (code: string) => {
+          return (0, eval)(code)
+        },
+        args: [message.payload.code],
+      })
+      .then((results) => {
+        sendResponse({ result: results?.[0]?.result })
+      })
+      .catch((error) => {
+        sendResponse({ error: error.message })
+      })
+    return true
+  }
+})
