@@ -1,0 +1,10 @@
+# 页面提取引擎
+
+build/
+.plasmo/
+dist/
+node_modules/
+
+# 开发
+*.log
+.DS_Store
