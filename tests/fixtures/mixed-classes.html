@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>Mixed Classes Test</title>
+</head>
+<body>
+<div id="root">
+  <!-- 自动生成 CSS 类名 + 语义类名混合场景 -->
+  <div class="css-a1b2c3 sc-xyz123 _private-class data-v-abc container">
+    <div class="css-hover meaningful-section">
+      <div class="sc-dkzDqf card-item" data-index="0">
+        <h3 class="css-1a2b3c sc-fKgJPI title-text">第一篇文章</h3>
+        <p class="_description css-desc paragraph">这是文章摘要内容</p>
+        <span class="sc-jRQBWg css-price amount">￥128.00</span>
+      </div>
+
+      <div class="sc-dkzDqf card-item" data-index="1">
+        <h3 class="css-1a2b3c sc-fKgJPI title-text">第二篇文章</h3>
+        <p class="_description css-desc paragraph">另一篇文章的内容</p>
+        <span class="sc-jRQBWg css-price amount">￥256.00</span>
+      </div>
+
+      <div class="sc-dkzDqf card-item" data-index="2">
+        <h3 class="css-1a2b3c sc-fKgJPI title-text">第三篇文章</h3>
+        <p class="_description css-desc paragraph">更多文章信息</p>
+        <span class="sc-jRQBWg css-price amount">￥399.00</span>
+      </div>
+    </div>
+
+    <!-- 嵌套更深、没有语义类的元素 -->
+    <div class="css-wrapper1">
+      <div class="css-wrapper2">
+        <div class="css-wrapper3">
+          <span class="css-target deep-target">深层嵌套目标元素</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 带 ID 的元素 -->
+    <div id="special-section" class="css-special">
+      <div class="css-item important-item">
+        <span class="label">重要标签</span>
+        <a href="/detail/1" class="css-link">查看详情</a>
+      </div>
+      <div class="css-item important-item">
+        <span class="label">另一个标签</span>
+        <a href="/detail/2" class="css-link">查看更多</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- 同名类但在不同容器中（测试唯一性） -->
+  <div id="section-a">
+    <div class="item">
+      <span class="name">Section A Item 1</span>
+    </div>
+    <div class="item">
+      <span class="name">Section A Item 2</span>
+    </div>
+  </div>
+
+  <div id="section-b">
+    <div class="item">
+      <span class="name">Section B Item 1</span>
+    </div>
+    <div class="item">
+      <span class="name">Section B Item 2</span>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,26 @@
+{
+  "name": "@wangjs-jacky/page-pilot-mcp",
+  "version": "0.1.0",
+  "description": "PagePilot MCP Server — Claude Code 通过此 MCP Server 控制浏览器提取网页数据",
+  "type": "module",
+  "bin": {
+    "page-pilot-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.0",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

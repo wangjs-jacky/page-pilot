@@ -5,6 +5,9 @@ import { getSettings, saveSettings } from "../lib/storage/settings"
 import type { AIProviderConfig } from "../lib/types"
 import "../style.css"
 
+// Provider ID 类型
+type ProviderId = AIProviderConfig["providerId"]
+
 export default function Options() {
   const [config, setConfig] = useState<AIProviderConfig>({
     providerId: "deepseek",
@@ -24,8 +27,10 @@ export default function Options() {
 
   const handleProviderChange = (providerId: string) => {
     const provider = PROVIDERS[providerId]
+    if (!provider) return
+
     setConfig({
-      providerId: providerId as AIProviderConfig["providerId"],
+      providerId: providerId as ProviderId,
       apiKey: "",
       model: provider.defaultModel,
     })
@@ -58,6 +63,17 @@ export default function Options() {
 
   const provider = PROVIDERS[config.providerId]
 
+  if (!provider) {
+    return (
+      <div className="min-h-screen bg-bg text-text font-sans p-8">
+        <div className="max-w-lg mx-auto text-center">
+          <h1 className="text-2xl font-bold mb-4">配置错误</h1>
+          <p className="text-text-muted">未找到服务商配置</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-bg text-text font-sans p-8">
       <div className="max-w-lg mx-auto">
@@ -71,8 +87,8 @@ export default function Options() {
             onChange={(e) => handleProviderChange(e.target.value)}
             className="w-full bg-bg-elevated border border-white/10 rounded-lg px-3 py-2 text-text focus:border-primary outline-none"
           >
-            {Object.values(PROVIDERS).map((p) => (
-              <option key={p.id} value={p.id}>
+            {Object.entries(PROVIDERS).map(([id, p]) => (
+              <option key={id} value={id}>
                 {p.name}
               </option>
             ))}

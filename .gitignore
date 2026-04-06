@@ -1,9 +1,15 @@
-# 页面提取引擎
+.omc
+.claude/
+.mcp.json
 
+# 页面提取引擎
 build/
 .plasmo/
 dist/
 node_modules/
+
+# 测试
+coverage/
 
 # 开发
 *.log

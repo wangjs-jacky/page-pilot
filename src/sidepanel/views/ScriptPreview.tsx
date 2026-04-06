@@ -1,38 +1,135 @@
-import { useState } from "react"
-import type { FieldMapping } from "../../lib/types"
+import { useState, useEffect } from "react"
+import type { ExtractionResult, FieldMapping, PaginationConfig } from "../../lib/types"
+import { getAIConfig } from "../../lib/storage/settings"
+import { optimizeScript } from "../../lib/ai/client"
 import { FieldList } from "../components/FieldList"
 
 interface Props {
+  scriptId?: string
   tempScript: {
     name: string
     urlPatterns: string[]
     fields: FieldMapping[]
     code: string
+    pagination?: PaginationConfig
+    cardSelector?: string
+    containerSelector?: string
   }
+  autoOpenOptimize?: boolean
+  executionResult?: Record<string, any>[]
   onSave: () => void
+  onExecute: (result: ExtractionResult, editContext?: { scriptId?: string; tempScript: any }) => void
   onCancel: () => void
 }
 
-export function ScriptPreview({ tempScript, onSave, onCancel }: Props) {
+export function ScriptPreview({ scriptId, tempScript, autoOpenOptimize, executionResult, onSave, onExecute, onCancel }: Props) {
   const [name, setName] = useState(tempScript.name || "新脚本")
   const [urlPatterns, setUrlPatterns] = useState(tempScript.urlPatterns.join("\n"))
   const [code, setCode] = useState(tempScript.code)
+  const [executing, setExecuting] = useState(false)
+  const [optimizeOpen, setOptimizeOpen] = useState(autoOpenOptimize || false)
+  const [optimizeInput, setOptimizeInput] = useState("")
+  const [optimizing, setOptimizing] = useState(false)
+  const [optimizeError, setOptimizeError] = useState("")
+  const [animating, setAnimating] = useState(!scriptId) // 新建脚本时播放动画
+
+  // 如果 autoOpenOptimize 变化，展开优化面板
+  useEffect(() => {
+    if (autoOpenOptimize) setOptimizeOpen(true)
+  }, [autoOpenOptimize])
+
+  // 动画结束后清除标记
+  useEffect(() => {
+    if (animating) {
+      const timer = setTimeout(() => setAnimating(false), 1500)
+      return () => clearTimeout(timer)
+    }
+  }, [animating])
 
   const handleSave = async () => {
-    const { saveScript } = await import("../../lib/storage/scripts")
+    const { saveScript, getScript } = await import("../../lib/storage/scripts")
+    const id = scriptId || crypto.randomUUID()
+    const existing = scriptId ? await getScript(scriptId) : null
     await saveScript({
-      id: crypto.randomUUID(),
+      id,
       name: name.trim() || "未命名脚本",
       urlPatterns: urlPatterns.split("\n").filter(Boolean),
       fields: tempScript.fields,
       code,
-      createdAt: Date.now(),
+      createdAt: existing?.createdAt || Date.now(),
+      lastExecutedAt: existing?.lastExecutedAt,
+      pagination: tempScript.pagination,
+      cardSelector: tempScript.cardSelector,
+      containerSelector: tempScript.containerSelector,
     })
     onSave()
   }
 
+  const handleSaveAndExecute = async () => {
+    setExecuting(true)
+    const start = Date.now()
+    try {
+      // 通过 Background 执行，避免 CSP 限制
+      const response = await chrome.runtime.sendMessage({
+        type: "EXECUTE_IN_MAIN",
+        payload: { code },
+      })
+
+      if (response?.error) {
+        console.error("脚本执行失败:", response.error)
+        return
+      }
+
+      const data = response?.result || []
+      const duration = Date.now() - start
+
+      onExecute(
+        {
+          scriptId: scriptId || "",
+          data: Array.isArray(data) ? data : [data],
+          executedAt: Date.now(),
+          duration,
+          count: Array.isArray(data) ? data.length : 1,
+        },
+        {
+          scriptId,
+          tempScript: {
+            name: name.trim() || "未命名脚本",
+            urlPatterns: urlPatterns.split("\n").filter(Boolean),
+            fields: tempScript.fields,
+            code,
+            pagination: tempScript.pagination,
+            cardSelector: tempScript.cardSelector,
+            containerSelector: tempScript.containerSelector,
+          },
+        }
+      )
+    } catch (error) {
+      console.error("脚本执行失败:", error)
+    } finally {
+      setExecuting(false)
+    }
+  }
+
   const handleCopyCode = () => {
     navigator.clipboard.writeText(code)
+  }
+
+  const handleOptimize = async () => {
+    const requirement = optimizeInput.trim()
+    if (!requirement || optimizing) return
+    setOptimizing(true)
+    setOptimizeError("")
+    try {
+      const config = await getAIConfig()
+      const optimized = await optimizeScript(config, code, requirement, executionResult)
+      setCode(optimized)
+      setOptimizeInput("")
+    } catch (err: any) {
+      setOptimizeError(err?.message || "优化失败")
+    } finally {
+      setOptimizing(false)
+    }
   }
 
   return (
@@ -48,7 +145,7 @@ export function ScriptPreview({ tempScript, onSave, onCancel }: Props) {
         <span className="text-[10px] text-primary">保存脚本</span>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+      <div className={`flex-1 overflow-y-auto p-3 space-y-3 ${animating ? "script-land-enter" : ""}`}>
         {/* 脚本名称 */}
         <div>
           <label className="block text-[10px] text-text-muted mb-1">脚本名称</label>
@@ -73,12 +170,36 @@ export function ScriptPreview({ tempScript, onSave, onCancel }: Props) {
           />
         </div>
 
+        {/* 选择器信息 */}
+        {(tempScript.cardSelector || tempScript.containerSelector) && (
+          <div className="bg-bg-elevated border border-white/[0.06] rounded-lg p-2 space-y-1">
+            <div className="text-[10px] text-text-muted">
+              卡片选择器: <span className="text-blue">{tempScript.cardSelector || "-"}</span>
+            </div>
+            <div className="text-[10px] text-text-muted">
+              容器选择器: <span className="text-blue">{tempScript.containerSelector || "-"}</span>
+            </div>
+          </div>
+        )}
+
+        {/* 分页配置 */}
+        {tempScript.pagination?.enabled && (
+          <div className="bg-blue/10 border border-blue/20 rounded-lg p-2">
+            <div className="text-[10px] text-blue font-medium">分页提取已启用</div>
+            <div className="text-[9px] text-text-muted mt-0.5 space-y-0.5">
+              <div>模式: {tempScript.pagination.mode}</div>
+              <div>最大页数: {tempScript.pagination.maxPages}</div>
+              <div>等待时间: {tempScript.pagination.waitMs}ms</div>
+            </div>
+          </div>
+        )}
+
         {/* 字段映射 */}
         <div>
           <label className="block text-[10px] text-text-muted mb-1">
             字段映射 ({tempScript.fields.length} 个)
           </label>
-          <FieldList fields={tempScript.fields} onRemove={() => {}} />
+          <FieldList fields={tempScript.fields} onRemove={() => {}} animated={animating} />
         </div>
 
         {/* 代码预览 */}
@@ -92,7 +213,7 @@ export function ScriptPreview({ tempScript, onSave, onCancel }: Props) {
               复制
             </button>
           </div>
-          <div className="bg-bg-elevated border border-primary/20 rounded-lg overflow-hidden">
+          <div className={`bg-bg-elevated border border-primary/20 rounded-lg overflow-hidden ${animating ? "script-land-code" : ""}`}>
             <div className="p-0.5 bg-primary/5 border-b border-primary/10 px-2">
               <span className="text-[9px] text-primary">提取脚本</span>
             </div>
@@ -103,6 +224,44 @@ export function ScriptPreview({ tempScript, onSave, onCancel }: Props) {
               className="w-full bg-transparent p-2 text-[10px] text-text-muted font-mono leading-relaxed outline-none resize-y"
             />
           </div>
+        </div>
+
+        {/* AI 优化面板 */}
+        <div className="border border-white/[0.06] rounded-lg overflow-hidden">
+          <button
+            onClick={() => setOptimizeOpen(!optimizeOpen)}
+            className="w-full flex items-center justify-between p-2 text-left hover:bg-white/[0.02] transition-colors"
+          >
+            <span className="text-[10px] text-amber font-medium">✨ AI 优化脚本</span>
+            <span className="text-[9px] text-text-muted">{optimizeOpen ? "收起" : "展开"}</span>
+          </button>
+          {optimizeOpen && (
+            <div className="px-2 pb-2 space-y-2 border-t border-white/[0.06]">
+              <textarea
+                value={optimizeInput}
+                onChange={(e) => setOptimizeInput(e.target.value)}
+                placeholder="描述优化需求，如：添加价格字段、修复空值问题、提取更多数据..."
+                rows={2}
+                className="w-full bg-bg border border-white/10 rounded px-2 py-1.5 text-[10px] text-text placeholder-text-muted outline-none focus:border-amber/40 resize-none mt-2"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleOptimize()
+                }}
+              />
+              {optimizeError && (
+                <div className="text-[9px] text-red bg-red/10 border border-red/20 rounded px-2 py-1">
+                  {optimizeError}
+                </div>
+              )}
+              <button
+                onClick={handleOptimize}
+                disabled={optimizing || !optimizeInput.trim()}
+                className="w-full text-center text-[10px] py-1.5 rounded font-medium transition-all disabled:opacity-40 bg-amber/10 text-amber border border-amber/20 hover:bg-amber/20"
+              >
+                {optimizing ? "AI 优化中..." : "优化脚本"}
+              </button>
+              <div className="text-[8px] text-text-muted text-center">Ctrl + Enter 快捷发送</div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -116,9 +275,16 @@ export function ScriptPreview({ tempScript, onSave, onCancel }: Props) {
         </button>
         <button
           onClick={handleSave}
-          className="flex-1 text-center text-[11px] text-bg bg-primary py-2 rounded font-bold hover:bg-primary/90"
+          className="flex-1 text-center text-[11px] text-text-muted py-2 border border-primary/30 rounded hover:bg-primary/5"
         >
           保存脚本
+        </button>
+        <button
+          onClick={handleSaveAndExecute}
+          disabled={executing}
+          className="flex-1 text-center text-[11px] text-bg bg-primary py-2 rounded font-bold hover:bg-primary/90 disabled:opacity-50"
+        >
+          {executing ? "执行中..." : "执行"}
         </button>
       </div>
     </div>

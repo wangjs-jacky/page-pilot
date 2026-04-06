@@ -1,3 +1,5 @@
+import type { ElementCapture } from "../lib/types"
+
 let pickerActive = false
 let hoveredElement: Element | null = null
 
@@ -78,6 +80,77 @@ function getNthChildPath(el: Element): string {
   return parts.join(" > ")
 }
 
+// --- 富 DOM 序列化 ---
+
+const MAX_HTML_LENGTH = 4000
+
+// 获取元素的通用选择器（不含 nth-child），用于计算同级元素
+function getGenericSelector(el: Element): string {
+  const tag = el.tagName.toLowerCase()
+  const classes = Array.from(el.classList).filter(
+    (c) => !c.startsWith("css-") && !c.startsWith("sc-") && !c.startsWith("_") && !c.startsWith("data-v-")
+  )
+  if (classes.length > 0) {
+    return `${tag}.${classes.map((c) => CSS.escape(c)).join(".")}`
+  }
+  return tag
+}
+
+// 序列化元素 HTML，去除冗余内容并截断
+function serializeElement(el: Element): string {
+  const clone = el.cloneNode(true) as Element
+
+  // 去除 script、style、svg 标签
+  clone.querySelectorAll("script, style, svg").forEach((node) => node.remove())
+
+  // 去除事件处理属性
+  clone.querySelectorAll("*").forEach((node) => {
+    Array.from(node.attributes).forEach((attr) => {
+      if (attr.name.startsWith("on")) {
+        node.removeAttribute(attr.name)
+      }
+    })
+  })
+
+  let html = clone.outerHTML
+
+  // 如果超长，截断并标记
+  if (html.length > MAX_HTML_LENGTH) {
+    html = html.slice(0, MAX_HTML_LENGTH) + "\n<!-- ... 截断 ... -->"
+  }
+
+  return html
+}
+
+// 检测同级同类元素
+function detectSiblings(el: Element): { siblingCount: number; parentContext: string } {
+  const parent = el.parentElement
+  if (!parent) {
+    return { siblingCount: 1, parentContext: "" }
+  }
+
+  const genericSelector = getGenericSelector(el)
+  const siblings = parent.querySelectorAll(`:scope > ${genericSelector}`)
+
+  // 序列化父容器结构（只包含直接子元素的标签+类名）
+  const childSummaries = Array.from(parent.children).map((child) => {
+    const tag = child.tagName.toLowerCase()
+    const classes = Array.from(child.classList).slice(0, 3).join(".")
+    return classes ? `<${tag} class="${classes}">` : `<${tag}>`
+  })
+
+  const parentTag = parent.tagName.toLowerCase()
+  const parentClasses = Array.from(parent.classList).slice(0, 3).join(".")
+  const parentStr = parentClasses
+    ? `<${parentTag} class="${parentClasses}"> [${childSummaries.join(", ")}]</${parentTag}>`
+    : `<${parentTag}> [${childSummaries.join(", ")}]</${parentTag}>`
+
+  return {
+    siblingCount: siblings.length,
+    parentContext: parentStr,
+  }
+}
+
 function onMouseOver(e: MouseEvent) {
   if (!pickerActive) return
   const target = e.target as Element
@@ -99,9 +172,23 @@ function onClick(e: MouseEvent) {
   const target = e.target as Element
   const selector = calculateSelector(target)
   const text = target.textContent?.trim().slice(0, 50) || ""
+
+  // 富 DOM 捕获
+  const outerHTML = serializeElement(target)
+  const { siblingCount, parentContext } = detectSiblings(target)
+
+  const capture: ElementCapture = {
+    selector,
+    tagName: target.tagName.toLowerCase(),
+    text,
+    outerHTML,
+    parentContext,
+    siblingCount,
+  }
+
   chrome.runtime.sendMessage({
     type: "ELEMENT_SELECTED",
-    payload: { selector, tagName: target.tagName.toLowerCase(), text },
+    payload: capture,
   })
 }
 

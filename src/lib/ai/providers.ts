@@ -1,3 +1,15 @@
+import type { Settings, AIProviderConfig } from "../types"
+
+const SETTINGS_KEY = "pagepilot_settings"
+
+const DEFAULT_SETTINGS: Settings = {
+  ai: {
+    providerId: "deepseek",
+    apiKey: "",
+    model: "deepseek-chat",
+  },
+}
+
 export interface ProviderInfo {
   id: string
   name: string
@@ -18,22 +30,27 @@ export const PROVIDERS: Record<string, ProviderInfo> = {
     id: "zhipu",
     name: "智谱（GLM）",
     baseURL: "https://open.bigmodel.cn/api/paas/v4",
-    models: ["glm-4", "glm-4-flash", "glm-4-plus"],
-    defaultModel: "glm-4",
+    models: ["glm-4-flash", "glm-4-plus", "glm-4"],
+    defaultModel: "glm-4-flash",
   },
   deepseek: {
     id: "deepseek",
     name: "DeepSeek",
-    baseURL: "https://api.deepseek.com",
-    models: ["deepseek-chat", "deepseek-reasoner"],
+    baseURL: "https://api.deepseek.com/v1",
+    models: ["deepseek-chat", "deepseek-coder"],
     defaultModel: "deepseek-chat",
   },
   openrouter: {
     id: "openrouter",
     name: "OpenRouter",
     baseURL: "https://openrouter.ai/api/v1",
-    models: ["openai/gpt-4o", "anthropic/claude-sonnet-4-6", "google/gemini-2.0-flash"],
-    defaultModel: "openai/gpt-4o",
+    models: [
+      "anthropic/claude-3.5-sonnet",
+      "anthropic/claude-3-opus",
+      "openai/gpt-4-turbo",
+      "openai/gpt-4o",
+    ],
+    defaultModel: "anthropic/claude-3.5-sonnet",
   },
 }
 

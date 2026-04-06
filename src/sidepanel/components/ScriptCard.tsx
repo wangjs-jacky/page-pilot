@@ -1,3 +1,4 @@
+import { useState } from "react"
 import type { ExtractionScript } from "../../lib/types"
 
 interface Props {
@@ -9,10 +10,21 @@ interface Props {
 }
 
 export function ScriptCard({ script, isMatched, onExecute, onEdit, onDelete }: Props) {
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const fieldSummary = script.fields.map((f) => f.name).join(" · ")
   const lastRun = script.lastExecutedAt
     ? new Date(script.lastExecutedAt).toLocaleDateString("zh-CN")
     : "未执行"
+  const created = new Date(script.createdAt).toLocaleDateString("zh-CN")
+
+  const handleDeleteClick = () => {
+    if (confirmDelete) {
+      onDelete(script.id)
+      setConfirmDelete(false)
+    } else {
+      setConfirmDelete(true)
+    }
+  }
 
   return (
     <div
@@ -38,16 +50,17 @@ export function ScriptCard({ script, isMatched, onExecute, onEdit, onDelete }: P
             ✎
           </button>
           <button
-            onClick={() => onDelete(script.id)}
-            className="text-xs text-text-muted hover:text-red"
+            onClick={handleDeleteClick}
+            onBlur={() => setConfirmDelete(false)}
+            className={`text-xs ${confirmDelete ? "text-red font-bold" : "text-text-muted hover:text-red"}`}
           >
-            ✕
+            {confirmDelete ? "确认?" : "✕"}
           </button>
         </div>
       </div>
       <div className="text-xs text-text-muted truncate">提取: {fieldSummary}</div>
       <div className="flex justify-between mt-1.5">
-        <span className="text-[10px] text-text-muted">{script.urlPatterns.join(", ")}</span>
+        <span className="text-[10px] text-text-muted">创建: {created}</span>
         <span className="text-[10px] text-text-muted">最后执行: {lastRun}</span>
       </div>
     </div>

@@ -3,9 +3,10 @@ import type { FieldMapping } from "../../lib/types"
 interface Props {
   fields: FieldMapping[]
   onRemove: (index: number) => void
+  animated?: boolean
 }
 
-export function FieldList({ fields, onRemove }: Props) {
+export function FieldList({ fields, onRemove, animated }: Props) {
   if (fields.length === 0) {
     return <div className="text-[10px] text-text-muted text-center py-2">还没有选择字段</div>
   }
@@ -15,7 +16,8 @@ export function FieldList({ fields, onRemove }: Props) {
       {fields.map((field, i) => (
         <div
           key={i}
-          className="flex justify-between items-center bg-primary/5 border border-primary/10 rounded px-2 py-1.5"
+          className={`flex justify-between items-center bg-primary/5 border border-primary/10 rounded px-2 py-1.5 ${animated ? "script-land-field" : ""}`}
+          style={animated ? { animationDelay: `${i * 80 + 400}ms` } : undefined}
         >
           <div className="flex-1 min-w-0">
             <span className="text-[11px] text-primary">{field.name}</span>

@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from "react"
-import type { ViewState, ExtractionScript, ExtractionResult, FieldMapping } from "../lib/types"
-import { getAllScripts } from "../lib/storage/scripts"
+import type { ViewState, ExtractionScript, ExtractionResult, FieldMapping, PaginationConfig, ClaudeCodeResult, ClaudeCodeSkill } from "../lib/types"
+import { getAllScripts, getScript } from "../lib/storage/scripts"
 import { ScriptLibrary } from "./views/ScriptLibrary"
 import { ElementPicker } from "./views/ElementPicker"
 import { ScriptPreview } from "./views/ScriptPreview"
 import { ResultView } from "./views/ResultView"
+import { ClaudeCodeView } from "./views/ClaudeCodeView"
+import { ClaudeCodeResultView } from "./views/ClaudeCodeResultView"
 import "../style.css"
 
 export default function SidePanel() {
@@ -49,18 +51,63 @@ export default function SidePanel() {
     setViewState({ view: "picker" })
   }, [])
 
+  // 从 Picker 生成后进入 Preview（新建模式）
   const goPreview = useCallback(
-    (fields: FieldMapping[], code: string, name: string, urlPatterns: string[]) => {
+    (
+      fields: FieldMapping[],
+      code: string,
+      name: string,
+      urlPatterns: string[],
+      pagination?: PaginationConfig,
+      cardSelector?: string,
+      containerSelector?: string
+    ) => {
       setViewState({
         view: "preview",
-        tempScript: { name, urlPatterns, fields, code },
+        tempScript: {
+          name,
+          urlPatterns,
+          fields,
+          code,
+          pagination,
+          cardSelector,
+          containerSelector,
+        },
       })
     },
     []
   )
 
-  const goResult = useCallback((result: ExtractionResult) => {
-    setViewState({ view: "result", result })
+  // 从 Library 编辑已有脚本 → 加载后跳到 Preview
+  const goEditPreview = useCallback(async (scriptId: string) => {
+    const script = await getScript(scriptId)
+    if (!script) return
+    setViewState({
+      view: "preview",
+      scriptId,
+      tempScript: {
+        name: script.name,
+        urlPatterns: script.urlPatterns,
+        fields: script.fields,
+        code: script.code,
+        pagination: script.pagination,
+        cardSelector: script.cardSelector,
+        containerSelector: script.containerSelector,
+      },
+    })
+  }, [])
+
+  // 执行后跳到 Result，同时记录 editContext 以便回退到 Preview
+  const goResult = useCallback((result: ExtractionResult, editContext?: { scriptId?: string; tempScript: Omit<ExtractionScript, "id" | "createdAt"> }) => {
+    setViewState({ view: "result", result, editContext })
+  }, [])
+
+  const goClaudeCode = useCallback((skills?: ClaudeCodeSkill[]) => {
+    setViewState({ view: "claude-code", mode: "idle", skills })
+  }, [])
+
+  const goClaudeCodeResult = useCallback((result: ClaudeCodeResult) => {
+    setViewState({ view: "claude-code-result", result })
   }, [])
 
   return (
@@ -70,11 +117,10 @@ export default function SidePanel() {
           scripts={scripts}
           matchedIds={matchedIds}
           onNewScript={goPicker}
-          onEditScript={(id) => {
-            setViewState({ view: "picker", scriptId: id })
-          }}
+          onEditScript={goEditPreview}
           onExecuteScript={goResult}
           onDeleteScript={loadScripts}
+          onOpenClaudeCode={() => goClaudeCode()}
         />
       )}
       {viewState.view === "picker" && (
@@ -86,13 +132,56 @@ export default function SidePanel() {
       )}
       {viewState.view === "preview" && (
         <ScriptPreview
+          scriptId={viewState.scriptId}
           tempScript={viewState.tempScript}
+          autoOpenOptimize={viewState.autoOpenOptimize}
+          executionResult={viewState.executionResult}
           onSave={goLibrary}
-          onCancel={goPicker}
+          onExecute={(result) => goResult(result, { scriptId: viewState.scriptId, tempScript: viewState.tempScript })}
+          onCancel={goLibrary}
         />
       )}
       {viewState.view === "result" && (
-        <ResultView result={viewState.result} onBack={goLibrary} />
+        <ResultView
+          result={viewState.result}
+          onBack={goLibrary}
+          onEdit={
+            viewState.editContext
+              ? () =>
+                  setViewState({
+                    view: "preview",
+                    scriptId: viewState.editContext?.scriptId,
+                    tempScript: viewState.editContext!.tempScript,
+                  })
+              : undefined
+          }
+          onOptimize={
+            viewState.editContext
+              ? () =>
+                  setViewState({
+                    view: "preview",
+                    scriptId: viewState.editContext?.scriptId,
+                    tempScript: viewState.editContext!.tempScript,
+                    autoOpenOptimize: true,
+                    executionResult: viewState.result?.data,
+                  })
+              : undefined
+          }
+        />
+      )}
+      {viewState.view === "claude-code" && (
+        <ClaudeCodeView
+          skills={viewState.skills}
+          onBack={goLibrary}
+          onResult={goClaudeCodeResult}
+        />
+      )}
+      {viewState.view === "claude-code-result" && (
+        <ClaudeCodeResultView
+          result={viewState.result}
+          onNewRequest={() => goClaudeCode()}
+          onBack={goLibrary}
+        />
       )}
     </div>
   )

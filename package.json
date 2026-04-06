@@ -1,12 +1,17 @@
 {
   "name": "page-pilot",
+  "displayName": "PagePilot",
   "version": "0.1.0",
   "description": "AI-powered page data extraction Chrome extension",
   "private": true,
   "scripts": {
     "dev": "plasmo dev",
     "build": "plasmo build",
-    "preview": "plasmo preview"
+    "preview": "plasmo preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:integration": "vitest run tests/integration/"
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.49",
@@ -21,15 +26,30 @@
     "@types/chrome": "^0.0.287",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@vitest/coverage-v8": "^4.1.2",
     "autoprefixer": "^10.4.21",
+    "jsdom": "^29.0.1",
     "postcss": "^8.5.8",
     "prettier": "^3.4.2",
     "tailwindcss": "^3.4.17",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^4.1.2"
   },
   "pnpm": {
     "overrides": {
       "jiti": "1.21.6"
     }
+  },
+  "manifest": {
+    "permissions": [
+      "storage",
+      "activeTab",
+      "scripting",
+      "sidePanel",
+      "tabs"
+    ],
+    "host_permissions": [
+      "<all_urls>"
+    ]
   }
 }

@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>视频列表 - VideoSite</title>
+</head>
+<body>
+<div id="app">
+  <header class="site-header">
+    <nav class="nav-bar">
+      <a href="/" class="logo">VideoSite</a>
+      <div class="search-box">
+        <input type="text" class="search-input" placeholder="搜索视频" value="AI教程" />
+        <button class="search-btn">搜索</button>
+      </div>
+    </nav>
+  </header>
+
+  <main id="content" class="main-content">
+    <div class="filter-bar">
+      <button class="filter-btn active">综合</button>
+      <button class="filter-btn">最多播放</button>
+      <button class="filter-btn">最新发布</button>
+    </div>
+
+    <div class="video-list" id="video-list">
+      <div class="video-card">
+        <a href="//www.videosite.com/video/BV1xx411c7mD" class="cover-link" target="_blank">
+          <img src="https://example.com/cover1.jpg" alt="封面" class="cover" />
+          <span class="duration">12:34</span>
+          <span class="play-overlay"></span>
+        </a>
+        <div class="info">
+          <a href="//www.videosite.com/video/BV1xx411c7mD" class="title" target="_blank">AI 从入门到精通 - 第一集 基础概念</a>
+          <div class="meta">
+            <span class="up-name">科技频道</span>
+            <span class="play-text">1.2万播放</span>
+            <span class="danmu-count">345弹幕</span>
+          </div>
+          <span class="publish-date">2024-03-15</span>
+        </div>
+      </div>
+
+      <div class="video-card">
+        <a href="//www.videosite.com/video/BV2yy522d8nE" class="cover-link" target="_blank">
+          <img src="https://example.com/cover2.jpg" alt="封面" class="cover" />
+          <span class="duration">08:45</span>
+          <span class="play-overlay"></span>
+        </a>
+        <div class="info">
+          <a href="//www.videosite.com/video/BV2yy522d8nE" class="title" target="_blank">机器学习实战 - 线性回归详解</a>
+          <div class="meta">
+            <span class="up-name">ML大师</span>
+            <span class="play-text">89万播放</span>
+            <span class="danmu-count">1.2万弹幕</span>
+          </div>
+          <span class="publish-date">2024-02-20</span>
+        </div>
+      </div>
+
+      <div class="video-card">
+        <a href="//www.videosite.com/video/BV3zz633e9oF" class="cover-link" target="_blank">
+          <img src="https://example.com/cover3.jpg" alt="封面" class="cover" />
+          <span class="duration">25:10</span>
+          <span class="play-overlay"></span>
+        </a>
+        <div class="info">
+          <a href="//www.videosite.com/video/BV3zz633e9oF" class="title" target="_blank">深度学习框架对比 PyTorch vs TensorFlow</a>
+          <div class="meta">
+            <span class="up-name">代码工坊</span>
+            <span class="play-text">5.6万播放</span>
+            <span class="danmu-count">2,891弹幕</span>
+          </div>
+          <span class="publish-date">2024-03-01</span>
+        </div>
+      </div>
+
+      <div class="video-card">
+        <a href="//www.videosite.com/video/BV4aa744f0pG" class="cover-link" target="_blank">
+          <img src="https://example.com/cover4.jpg" alt="封面" class="cover" />
+          <span class="duration">15:22</span>
+          <span class="play-overlay"></span>
+        </a>
+        <div class="info">
+          <a href="//www.videosite.com/video/BV4aa744f0pG" class="title" target="_blank">ChatGPT 提示词工程完全指南</a>
+          <div class="meta">
+            <span class="up-name">AI探索者</span>
+            <span class="play-text">120.5万播放</span>
+            <span class="danmu-count">8,765弹幕</span>
+          </div>
+          <span class="publish-date">2024-01-10</span>
+        </div>
+      </div>
+
+      <div class="video-card">
+        <a href="//www.videosite.com/video/BV5bb855g1qH" class="cover-link" target="_blank">
+          <img src="https://example.com/cover5.jpg" alt="封面" class="cover" />
+          <span class="duration">06:30</span>
+          <span class="play-overlay"></span>
+        </a>
+        <div class="info">
+          <a href="//www.videosite.com/video/BV5bb855g1qH" class="title" target="_blank">Stable Diffusion 本地部署教程</a>
+          <div class="meta">
+            <span class="up-name">开源社</span>
+            <span class="play-text">3,456播放</span>
+            <span class="danmu-count">123弹幕</span>
+          </div>
+          <span class="publish-date">2024-03-12</span>
+        </div>
+      </div>
+
+      <div class="video-card">
+        <a href="//www.videosite.com/video/BV6cc966h2rJ" class="cover-link" target="_blank">
+          <img src="https://example.com/cover6.jpg" alt="封面" class="cover" />
+          <span class="duration">18:00</span>
+          <span class="play-overlay"></span>
+        </a>
+        <div class="info">
+          <a href="//www.videosite.com/video/BV6cc966h2rJ" class="title" target="_blank">Transformer 架构深入浅出</a>
+          <div class="meta">
+            <span class="up-name">论文解读</span>
+            <span class="play-text">45万播放</span>
+            <span class="danmu-count">6,789弹幕</span>
+          </div>
+          <span class="publish-date">2023-12-05</span>
+        </div>
+      </div>
+
+      <div class="video-card">
+        <a href="//www.videosite.com/video/BV7dd077i3sK" class="cover-link" target="_blank">
+          <img src="https://example.com/cover7.jpg" alt="封面" class="cover" />
+          <span class="duration">10:15</span>
+          <span class="play-overlay"></span>
+        </a>
+        <div class="info">
+          <a href="//www.videosite.com/video/BV7dd077i3sK" class="title" target="_blank">Python 数据分析入门 - Pandas 基础</a>
+          <div class="meta">
+            <span class="up-name">数据科学</span>
+            <span class="play-text">789播放</span>
+            <span class="danmu-count">12弹幕</span>
+          </div>
+          <span class="publish-date">2024-03-14</span>
+        </div>
+      </div>
+
+      <div class="video-card">
+        <a href="//www.videosite.com/video/BV8ee188j4tL" class="cover-link" target="_blank">
+          <img src="https://example.com/cover8.jpg" alt="封面" class="cover" />
+          <span class="duration">22:45</span>
+          <span class="play-overlay"></span>
+        </a>
+        <div class="info">
+          <a href="//www.videosite.com/video/BV8ee188j4tL" class="title" target="_blank">大语言模型微调实战 LoRA/QLoRA</a>
+          <div class="meta">
+            <span class="up-name">炼丹师</span>
+            <span class="play-text">2.3万播放</span>
+            <span class="danmu-count">567弹幕</span>
+          </div>
+          <span class="publish-date">2024-02-28</span>
+        </div>
+      </div>
+
+      <div class="video-card">
+        <a href="//www.videosite.com/video/BV9ff299k5uM" class="cover-link" target="_blank">
+          <img src="https://example.com/cover9.jpg" alt="封面" class="cover" />
+          <span class="duration">30:00</span>
+          <span class="play-overlay"></span>
+        </a>
+        <div class="info">
+          <a href="//www.videosite.com/video/BV9ff299k5uM" class="title" target="_blank">2024 AI 年度总结与未来展望</a>
+          <div class="meta">
+            <span class="up-name">前沿观察</span>
+            <span class="play-text">15.8万播放</span>
+            <span class="danmu-count">4,321弹幕</span>
+          </div>
+          <span class="publish-date">2024-03-10</span>
+        </div>
+      </div>
+
+      <div class="video-card">
+        <a href="//www.videosite.com/video/BV0gg300l6vN" class="cover-link" target="_blank">
+          <img src="https://example.com/cover10.jpg" alt="封面" class="cover" />
+          <span class="duration">14:20</span>
+          <span class="play-overlay"></span>
+        </a>
+        <div class="info">
+          <a href="//www.videosite.com/video/BV0gg300l6vN" class="title" target="_blank">RAG 检索增强生成从原理到实践</a>
+          <div class="meta">
+            <span class="up-name">知识工程</span>
+            <span class="play-text">6,789播放</span>
+            <span class="danmu-count">234弹幕</span>
+          </div>
+          <span class="publish-date">2024-03-08</span>
+        </div>
+      </div>
+    </div>
+
+    <nav class="pagination" id="pagination">
+      <button class="prev-btn" disabled>上一页</button>
+      <button class="page-btn active">1</button>
+      <button class="page-btn">2</button>
+      <button class="page-btn">3</button>
+      <button class="page-btn">4</button>
+      <button class="page-btn">5</button>
+      <button class="next-btn" id="next-page-btn">下一页</button>
+    </nav>
+  </main>
+</div>
+</body>
+</html>

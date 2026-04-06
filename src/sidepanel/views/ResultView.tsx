@@ -5,9 +5,11 @@ import { ExportBar } from "../components/ExportBar"
 interface Props {
   result: ExtractionResult
   onBack: () => void
+  onEdit?: () => void
+  onOptimize?: () => void
 }
 
-export function ResultView({ result, onBack }: Props) {
+export function ResultView({ result, onBack, onEdit, onOptimize }: Props) {
   return (
     <div className="flex flex-col h-screen">
       {/* 顶部 */}
@@ -47,9 +49,33 @@ export function ResultView({ result, onBack }: Props) {
         </div>
       </div>
 
-      {/* 导出栏 */}
-      <div className="p-3 border-t border-white/[0.06]">
+      {/* 底部 */}
+      <div className="p-3 border-t border-white/[0.06] space-y-2">
         <ExportBar data={result.data} scriptName="提取结果" />
+        <div className="flex gap-2">
+          <button
+            onClick={onBack}
+            className="flex-1 text-center text-[11px] text-text-muted py-2 border border-white/[0.08] rounded hover:bg-white/[0.03]"
+          >
+            返回列表
+          </button>
+          {onOptimize && (
+            <button
+              onClick={onOptimize}
+              className="flex-1 text-center text-[11px] text-amber py-2 border border-amber/30 rounded hover:bg-amber/5 font-medium"
+            >
+              ✨ AI 优化
+            </button>
+          )}
+          {onEdit && (
+            <button
+              onClick={onEdit}
+              className="flex-1 text-center text-[11px] text-bg bg-primary py-2 rounded font-bold hover:bg-primary/90"
+            >
+              重新编辑
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )
