@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import type { ExtractionScript, ExtractionResult } from "../../lib/types"
-import { deleteScript, updateLastExecuted } from "../../lib/storage/scripts"
+import { deleteScript, duplicateScript, updateLastExecuted } from "../../lib/storage/scripts"
 import { ScriptCard } from "../components/ScriptCard"
 
 interface Props {
@@ -11,6 +11,7 @@ interface Props {
   onExecuteScript: (result: ExtractionResult, editContext?: { scriptId?: string; tempScript: any }) => void
   onDeleteScript: () => void
   onOpenClaudeCode: () => void
+  onRefresh: () => void
 }
 
 export function ScriptLibrary({
@@ -21,18 +22,21 @@ export function ScriptLibrary({
   onExecuteScript,
   onDeleteScript,
   onOpenClaudeCode,
+  onRefresh,
 }: Props) {
   const [mcpConnected, setMcpConnected] = useState(false)
   const [executing, setExecuting] = useState<string | null>(null)
 
   useEffect(() => {
-    // 检查初始状态
-    chrome.runtime.sendMessage({ type: "MCP_STATUS" }, (res) => {
-      if (res?.connected) setMcpConnected(true)
-    })
+    // 尝试自动连接 Bridge（Bridge 运行则自动连上，否则静默跳过）
+    chrome.runtime.sendMessage({ type: "MCP_AUTO_CONNECT" })
 
-    // 监听连接状态变化（保留 MCP 监听通道）
-    const listener = (_message: any) => {}
+    // 监听连接状态变化（自动连接成功/失败都会通过此通知）
+    const listener = (message: any) => {
+      if (message.type === "MCP_STATUS" && message.payload) {
+        setMcpConnected(message.payload.connected)
+      }
+    }
     chrome.runtime.onMessage.addListener(listener)
     return () => chrome.runtime.onMessage.removeListener(listener)
   }, [])
@@ -50,8 +54,56 @@ export function ScriptLibrary({
     const start = Date.now()
     setExecuting(script.id)
 
-    // 统一通过 Background 在 MAIN world 执行（分页逻辑已内嵌在脚本中）
     try {
+      // 有分页配置时走分页执行
+      if (script.pagination?.enabled) {
+        const data = await new Promise<Record<string, any>[]>((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            chrome.runtime.onMessage.removeListener(listener)
+            reject(new Error("分页执行超时"))
+          }, 120_000)
+
+          const listener = (message: any) => {
+            if (message.type === "SCRIPT_RESULT") {
+              clearTimeout(timeout)
+              chrome.runtime.onMessage.removeListener(listener)
+              resolve(message.payload.data || [])
+            }
+            if (message.type === "PAGINATED_PROGRESS" && message.payload?.error) {
+              clearTimeout(timeout)
+              chrome.runtime.onMessage.removeListener(listener)
+              reject(new Error(message.payload.error))
+            }
+          }
+          chrome.runtime.onMessage.addListener(listener)
+
+          chrome.runtime.sendMessage({
+            type: "EXECUTE_PAGINATED",
+            payload: { code: script.code, pagination: script.pagination },
+          })
+        })
+
+        const duration = Date.now() - start
+        await updateLastExecuted(script.id)
+        onExecuteScript(
+          { scriptId: script.id, data, executedAt: Date.now(), duration, count: data.length },
+          {
+            scriptId: script.id,
+            tempScript: {
+              name: script.name,
+              urlPatterns: script.urlPatterns,
+              fields: script.fields,
+              code: script.code,
+              pagination: script.pagination,
+              cardSelector: script.cardSelector,
+              containerSelector: script.containerSelector,
+            },
+          }
+        )
+        return
+      }
+
+      // 无分页：单页执行
       const response = await chrome.runtime.sendMessage({
         type: "EXECUTE_IN_MAIN",
         payload: { code: script.code },
@@ -64,7 +116,6 @@ export function ScriptLibrary({
 
       const data = response?.result || []
       const duration = Date.now() - start
-
       await updateLastExecuted(script.id)
 
       onExecuteScript(
@@ -100,13 +151,30 @@ export function ScriptLibrary({
     onDeleteScript()
   }
 
+  const handleDuplicate = async (id: string) => {
+    await duplicateScript(id)
+    onDeleteScript()
+  }
+
   const matchedCount = scripts.filter((s) => matchedIds.includes(s.id)).length
 
   return (
     <div className="flex flex-col h-screen">
       {/* 顶部 */}
       <div className="flex justify-between items-center p-3 border-b border-white/[0.06]">
-        <span className="text-sm font-bold">PagePilot</span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm font-bold">PagePilot</span>
+          <button
+            onClick={onRefresh}
+            className="text-text-muted hover:text-text transition-colors"
+            title="刷新脚本列表"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="23 4 23 10 17 10" />
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+            </svg>
+          </button>
+        </div>
         <div className="flex gap-2 items-center">
           <button
             onClick={toggleMCP}
@@ -171,6 +239,7 @@ export function ScriptLibrary({
               onExecute={handleExecute}
               onEdit={onEditScript}
               onDelete={handleDelete}
+              onDuplicate={handleDuplicate}
             />
           ))
         )}

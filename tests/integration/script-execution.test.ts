@@ -41,12 +41,12 @@ function extractProducts(): Record<string, any>[] {
 
     let price: number | null = null
     if (priceEl) {
-      const priceText = priceEl.textContent.replace(/[¥]/g, "").trim()
+      const priceText = priceEl.textContent.replace(/[¥￥]/g, "").trim()
       price = parseFloat(priceText)
     }
     let originalPrice: number | null = null
     if (originalEl) {
-      const priceText = originalEl.textContent.replace(/[¥]/g, "").trim()
+      const priceText = originalEl.textContent.replace(/[¥￥]/g, "").trim()
       originalPrice = parseFloat(priceText)
     }
 
@@ -72,11 +72,11 @@ describe("Script Execution - video card extraction", () => {
     const results = extractVideoCards()
 
     expect(results).toHaveLength(10)
-    expect(results[0].title).toBe("AI \u4ECE\u5165\u95E8\u7CBE\u7EC - \u7B2C\u4E00\u96C6 \u57FA\u7801\u5E74 \u57FA\u7801\u96C6 \u57FA\u7801\u5E76")
+    expect(results[0].title).toBe("AI 从入门到精通 - 第一集 基础概念")
     expect(results[0].url).toContain("BV1xx411c7mD")
     expect(results[0].coverUrl).toBe("https://example.com/cover1.jpg")
-    expect(results[0].author).toBe("\u79D1\u6280\u9891\u9891\u9891")
-    expect(results[0].playCount).toContain("\u64AD\u653E")
+    expect(results[0].author).toBe("科技频道")
+    expect(results[0].playCount).toContain("播放")
     expect(results[0].duration).toBe("12:34")
     expect(results[0].publishDate).toBe("2024-03-15")
   })
@@ -92,8 +92,8 @@ describe("Script Execution - video card extraction", () => {
     injectBodyHTML("video-cards.html")
     ensureCSSPolyfill()
     const results = extractVideoCards()
-    expect(results[1].author).toBe("ML\u5927\u5E08")
-    expect(results[1].playCount).toContain("\u4E07\u653E")
+    expect(results[1].author).toBe("ML大师")
+    expect(results[1].playCount).toContain("万播放")
   })
 })
 
@@ -105,7 +105,7 @@ describe("Script Execution - product list extraction", () => {
     const results = extractProducts()
 
     expect(results).toHaveLength(10)
-    expect(results[0].name).toContain("\u84DD\u7801\u7259\u803\u7D1")
+    expect(results[0].name).toContain("蓝牙耳机")
     expect(results[0].price).toBe(199)
     expect(results[0].originalPrice).toBe(399)
     expect(results[0].url).toBe("/product/1001")
@@ -178,7 +178,9 @@ describe("Script Execution - auto-generated class filtering", () => {
     injectBodyHTML("mixed-classes.html")
     ensureCSSPolyfill()
     const items = document.querySelectorAll(".important-item")
-    const labels = Array.from(items).map((el) => el.textContent?.trim())
-    expect(labels).toEqual(["\u91CD\u8981\u6807\u7B7E", "\u53E6E00\u4E2C\u6807\u7B7E"])
+    const labels = Array.from(items).map((el) =>
+      (el.textContent || "").replace(/\s+/g, " ").trim()
+    )
+    expect(labels).toEqual(["重要标签 查看详情", "另一个标签 查看更多"])
   })
 })

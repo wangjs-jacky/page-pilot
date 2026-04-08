@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react"
-import type { ExtractionResult, FieldMapping, PaginationConfig } from "../../lib/types"
+import type { ExtractionResult, FieldMapping, PaginationConfig, DryRunResult } from "../../lib/types"
 import { getAIConfig } from "../../lib/storage/settings"
-import { optimizeScript } from "../../lib/ai/client"
+import { optimizeScript, type OptimizeScriptResult } from "../../lib/ai/client"
 import { FieldList } from "../components/FieldList"
 
 interface Props {
@@ -20,9 +20,10 @@ interface Props {
   onSave: () => void
   onExecute: (result: ExtractionResult, editContext?: { scriptId?: string; tempScript: any }) => void
   onCancel: () => void
+  dryRunResult?: DryRunResult
 }
 
-export function ScriptPreview({ scriptId, tempScript, autoOpenOptimize, executionResult, onSave, onExecute, onCancel }: Props) {
+export function ScriptPreview({ scriptId, tempScript, autoOpenOptimize, executionResult, dryRunResult, onSave, onExecute, onCancel }: Props) {
   const [name, setName] = useState(tempScript.name || "新脚本")
   const [urlPatterns, setUrlPatterns] = useState(tempScript.urlPatterns.join("\n"))
   const [code, setCode] = useState(tempScript.code)
@@ -32,6 +33,10 @@ export function ScriptPreview({ scriptId, tempScript, autoOpenOptimize, executio
   const [optimizing, setOptimizing] = useState(false)
   const [optimizeError, setOptimizeError] = useState("")
   const [animating, setAnimating] = useState(!scriptId) // 新建脚本时播放动画
+  const [optimizeHistory, setOptimizeHistory] = useState<
+    Array<{ requirement: string; response: string; timestamp: number }>
+  >([])
+  const [pagination, setPagination] = useState<PaginationConfig | undefined>(tempScript.pagination)
 
   // 如果 autoOpenOptimize 变化，展开优化面板
   useEffect(() => {
@@ -58,7 +63,7 @@ export function ScriptPreview({ scriptId, tempScript, autoOpenOptimize, executio
       code,
       createdAt: existing?.createdAt || Date.now(),
       lastExecutedAt: existing?.lastExecutedAt,
-      pagination: tempScript.pagination,
+      pagination,
       cardSelector: tempScript.cardSelector,
       containerSelector: tempScript.containerSelector,
     })
@@ -98,7 +103,7 @@ export function ScriptPreview({ scriptId, tempScript, autoOpenOptimize, executio
             urlPatterns: urlPatterns.split("\n").filter(Boolean),
             fields: tempScript.fields,
             code,
-            pagination: tempScript.pagination,
+            pagination,
             cardSelector: tempScript.cardSelector,
             containerSelector: tempScript.containerSelector,
           },
@@ -122,8 +127,12 @@ export function ScriptPreview({ scriptId, tempScript, autoOpenOptimize, executio
     setOptimizeError("")
     try {
       const config = await getAIConfig()
-      const optimized = await optimizeScript(config, code, requirement, executionResult)
-      setCode(optimized)
+      const result = await optimizeScript(config, code, requirement, executionResult)
+      setCode(result.code)
+      setOptimizeHistory((prev) => [
+        ...prev,
+        { requirement, response: result.rawResponse, timestamp: Date.now() },
+      ])
       setOptimizeInput("")
     } catch (err: any) {
       setOptimizeError(err?.message || "优化失败")
@@ -182,14 +191,172 @@ export function ScriptPreview({ scriptId, tempScript, autoOpenOptimize, executio
           </div>
         )}
 
+        {/* Dry-Run 结果 */}
+        {dryRunResult && (
+          <div className={`rounded-lg p-2 border ${
+            dryRunResult.success
+              ? "bg-primary/5 border-primary/20"
+              : "bg-amber/5 border-amber/20"
+          }`}>
+            <div className={`text-[10px] font-medium ${
+              dryRunResult.success ? "text-primary" : "text-amber"
+            }`}>
+              {dryRunResult.success
+                ? `✓ Dry-Run 通过 (${dryRunResult.itemCount} 条数据)`
+                : `⚠ Dry-Run 未通过: ${dryRunResult.error || "返回空数据"}`
+              }
+            </div>
+            {!dryRunResult.success && (
+              <div className="text-[9px] text-text-muted mt-1">
+                脚本已尝试自动修复。如果执行结果不理想，可使用下方"AI 优化"手动调整。
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 分页配置 - 开启按钮 */}
+        {!pagination?.enabled && (
+          <button
+            onClick={() =>
+              setPagination({
+                enabled: true,
+                mode: "click",
+                nextButtonSelector: "",
+                maxPages: 3,
+                waitMs: 2000,
+              })
+            }
+            className="w-full flex items-center justify-between p-2 border border-white/[0.06] rounded-lg hover:bg-white/[0.02] transition-colors"
+          >
+            <span className="text-[10px] text-text-muted">分页提取</span>
+            <span className="text-[9px] text-blue">+ 开启</span>
+          </button>
+        )}
+
         {/* 分页配置 */}
-        {tempScript.pagination?.enabled && (
-          <div className="bg-blue/10 border border-blue/20 rounded-lg p-2">
-            <div className="text-[10px] text-blue font-medium">分页提取已启用</div>
-            <div className="text-[9px] text-text-muted mt-0.5 space-y-0.5">
-              <div>模式: {tempScript.pagination.mode}</div>
-              <div>最大页数: {tempScript.pagination.maxPages}</div>
-              <div>等待时间: {tempScript.pagination.waitMs}ms</div>
+        {pagination?.enabled && (
+          <div className="bg-bg-elevated border border-blue/20 rounded-lg p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="text-[10px] text-blue font-medium">分页提取</div>
+              <button
+                onClick={() => setPagination(undefined)}
+                className="text-[9px] text-red hover:text-red/80"
+              >
+                关闭分页
+              </button>
+            </div>
+
+            {/* 翻页模式 */}
+            <div>
+              <div className="text-[10px] text-text-muted mb-1">翻页模式</div>
+              <div className="flex gap-1.5">
+                {(["click", "scroll", "url"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => setPagination({ ...pagination, mode })}
+                    className={`text-[10px] px-2 py-1 rounded border transition-all ${
+                      pagination.mode === mode
+                        ? "border-blue text-blue bg-blue/10"
+                        : "border-white/10 text-text-muted hover:border-white/20"
+                    }`}
+                  >
+                    {mode === "click" ? "点击翻页" : mode === "numbered" ? "数字分页" : mode === "scroll" ? "滚动加载" : "URL 翻页"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 下一页按钮选择器 */}
+            {pagination.mode === "click" && (
+              <div>
+                <div className="text-[10px] text-text-muted mb-1">下一页按钮选择器</div>
+                <input
+                  value={pagination.nextButtonSelector}
+                  onChange={(e) => setPagination({ ...pagination, nextButtonSelector: e.target.value })}
+                  placeholder="输入 CSS 选择器"
+                  className="w-full bg-bg border border-white/10 rounded px-2 py-1 text-[11px] text-text placeholder-text-muted outline-none focus:border-blue"
+                />
+              </div>
+            )}
+
+            {/* 页码按钮选择器（数字分页模式） */}
+            {pagination.mode === "numbered" && (
+              <div>
+                <div className="text-[10px] text-text-muted mb-1">页码按钮选择器</div>
+                <input
+                  value={pagination.pageButtonSelector || ""}
+                  onChange={(e) => setPagination({ ...pagination, pageButtonSelector: e.target.value })}
+                  placeholder="如 .pagination .page-item"
+                  className="w-full bg-bg border border-white/10 rounded px-2 py-1 text-[11px] text-text placeholder-text-muted outline-none focus:border-blue"
+                />
+                <div className="text-[9px] text-text-muted mt-1">
+                  匹配所有页码按钮的通用 CSS 选择器
+                </div>
+              </div>
+            )}
+
+            {/* 最大页数 */}
+            <div>
+              <div className="text-[10px] text-text-muted mb-1">最大提取页数</div>
+              <div className="flex gap-1.5 flex-wrap items-center">
+                {[1, 3, 5, 7].map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => setPagination({ ...pagination, maxPages: n })}
+                    className={`text-[10px] px-2 py-1 rounded border transition-all ${
+                      pagination.maxPages === n
+                        ? "border-blue text-blue bg-blue/10"
+                        : "border-white/10 text-text-muted hover:border-white/20"
+                    }`}
+                  >
+                    {n} 页
+                  </button>
+                ))}
+                <button
+                  onClick={() => {
+                    if ([1, 3, 5, 7].includes(pagination.maxPages)) {
+                      setPagination({ ...pagination, maxPages: 10 })
+                    }
+                  }}
+                  className={`text-[10px] px-2 py-1 rounded border transition-all ${
+                    ![1, 3, 5, 7].includes(pagination.maxPages)
+                      ? "border-blue text-blue bg-blue/10"
+                      : "border-white/10 text-text-muted hover:border-white/20"
+                  }`}
+                >
+                  自定义
+                </button>
+                {![1, 3, 5, 7].includes(pagination.maxPages) && (
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={pagination.maxPages}
+                    onChange={(e) =>
+                      setPagination({ ...pagination, maxPages: Math.max(1, Math.min(100, parseInt(e.target.value) || 1)) })
+                    }
+                    className="w-14 bg-bg border border-blue text-blue rounded px-1.5 py-1 text-[10px] text-center outline-none"
+                  />
+                )}
+              </div>
+            </div>
+
+            {/* 等待时间 */}
+            <div>
+              <div className="text-[10px] text-text-muted mb-1">
+                翻页后等待时间: {pagination.waitMs}ms
+              </div>
+              <input
+                type="range"
+                min={500}
+                max={5000}
+                step={500}
+                value={pagination.waitMs}
+                onChange={(e) =>
+                  setPagination({ ...pagination, waitMs: parseInt(e.target.value) })
+                }
+                className="w-full accent-blue"
+              />
             </div>
           </div>
         )}
@@ -260,6 +427,30 @@ export function ScriptPreview({ scriptId, tempScript, autoOpenOptimize, executio
                 {optimizing ? "AI 优化中..." : "优化脚本"}
               </button>
               <div className="text-[8px] text-text-muted text-center">Ctrl + Enter 快捷发送</div>
+
+              {/* AI 优化历史 */}
+              {optimizeHistory.length > 0 && (
+                <div className="space-y-2 mt-1">
+                  <div className="text-[9px] text-text-muted font-medium">优化记录</div>
+                  {[...optimizeHistory].reverse().map((item, i) => (
+                    <details
+                      key={item.timestamp}
+                      className="bg-bg border border-white/[0.06] rounded group"
+                      open={i === 0}
+                    >
+                      <summary className="text-[9px] text-amber/80 px-2 py-1 cursor-pointer hover:bg-white/[0.02] flex items-center justify-between">
+                        <span className="truncate flex-1 mr-2">{item.requirement}</span>
+                        <span className="text-[8px] text-text-muted shrink-0">
+                          {new Date(item.timestamp).toLocaleTimeString()}
+                        </span>
+                      </summary>
+                      <div className="px-2 pb-2 text-[9px] text-text-muted leading-relaxed whitespace-pre-wrap border-t border-white/[0.06] pt-1.5 max-h-40 overflow-y-auto">
+                        {item.response}
+                      </div>
+                    </details>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

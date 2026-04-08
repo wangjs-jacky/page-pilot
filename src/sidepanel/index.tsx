@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react"
-import type { ViewState, ExtractionScript, ExtractionResult, FieldMapping, PaginationConfig, ClaudeCodeResult, ClaudeCodeSkill } from "../lib/types"
+import type { ViewState, ExtractionScript, ExtractionResult, FieldMapping, PaginationConfig, ClaudeCodeResult, ClaudeCodeSkill, DryRunResult } from "../lib/types"
 import { getAllScripts, getScript } from "../lib/storage/scripts"
 import { ScriptLibrary } from "./views/ScriptLibrary"
 import { ElementPicker } from "./views/ElementPicker"
@@ -60,7 +60,8 @@ export default function SidePanel() {
       urlPatterns: string[],
       pagination?: PaginationConfig,
       cardSelector?: string,
-      containerSelector?: string
+      containerSelector?: string,
+      dryRunResult?: DryRunResult
     ) => {
       setViewState({
         view: "preview",
@@ -73,6 +74,7 @@ export default function SidePanel() {
           cardSelector,
           containerSelector,
         },
+        dryRunResult,
       })
     },
     []
@@ -120,6 +122,7 @@ export default function SidePanel() {
           onEditScript={goEditPreview}
           onExecuteScript={goResult}
           onDeleteScript={loadScripts}
+          onRefresh={loadScripts}
           onOpenClaudeCode={() => goClaudeCode()}
         />
       )}
@@ -136,6 +139,7 @@ export default function SidePanel() {
           tempScript={viewState.tempScript}
           autoOpenOptimize={viewState.autoOpenOptimize}
           executionResult={viewState.executionResult}
+          dryRunResult={viewState.dryRunResult}
           onSave={goLibrary}
           onExecute={(result) => goResult(result, { scriptId: viewState.scriptId, tempScript: viewState.tempScript })}
           onCancel={goLibrary}

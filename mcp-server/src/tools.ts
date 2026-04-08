@@ -1,11 +1,22 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
-import { Bridge } from "./bridge.js"
+import { BridgeClient } from "./bridge-client.js"
 
 /**
  * 注册所有 MCP 工具
  */
-export function registerTools(server: McpServer, bridge: Bridge) {
+export function registerTools(server: McpServer, bridge: BridgeClient) {
+  // 0. 列出脚本库
+  server.tool(
+    "script_list",
+    "列出 Chrome 扩展中保存的所有提取脚本（id、名称、URL 匹配模式、选择器）",
+    {},
+    async () => {
+      const scripts = await bridge.sendRequest("script_list", {})
+      return { content: [{ type: "text" as const, text: JSON.stringify(scripts, null, 2) }] }
+    }
+  )
+
   // 1. 获取当前页面 URL
   server.tool(
     "browser_get_url",
@@ -60,23 +71,17 @@ export function registerTools(server: McpServer, bridge: Bridge) {
       containerSelector: z.string().describe("列表容器的 CSS 选择器"),
       itemSelector: z.string().describe("每个列表项的 CSS 选择器"),
       fields: z
-        .record(
-          z.object({
-            selector: z.string().describe("字段对应的 CSS 选择器"),
-            attribute: z
-              .enum(["textContent", "href", "src", "innerHTML", "value", "data-*"])
-              .optional()
-              .default("textContent")
-              .describe("要提取的属性，默认 textContent"),
-          })
-        )
-        .describe("要提取的字段映射，key 为字段名"),
+        .string()
+        .describe(
+          '要提取的字段映射，JSON 格式。key 为字段名，value 为 { selector, attribute? }。例: {"title":{"selector":"h2"},"link":{"selector":"a","attribute":"href"}}'
+        ),
     },
     async ({ containerSelector, itemSelector, fields }) => {
+      const fieldsObj = JSON.parse(fields)
       const data = await bridge.sendRequest("extract_data", {
         containerSelector,
         itemSelector,
-        fields,
+        fields: fieldsObj,
       })
       return {
         content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
@@ -111,7 +116,119 @@ export function registerTools(server: McpServer, bridge: Bridge) {
     }
   )
 
-  // 7. 检查连接状态
+  // 7. 保存脚本到 Chrome 扩展
+  server.tool(
+    "script_save",
+    "创建或更新一个提取脚本，保存到 Chrome 扩展的脚本库中。由 LLM 决定脚本名称。",
+    {
+      name: z.string().describe("脚本名称，由 LLM 根据用途命名，如 'Bilibili UP主视频提取'"),
+      urlPatterns: z.string().describe("URL 匹配模式，逗号分隔，支持 * 通配符。如 'https://space.bilibili.com/*/upload/video'"),
+      code: z.string().describe("提取脚本的 JavaScript 代码，必须包含 return 语句返回数组"),
+      fields: z.string().describe("字段映射 JSON，格式: [{name, selector, attribute}]。例: [{\"name\":\"title\",\"selector\":\"h2\",\"attribute\":\"textContent\"}]"),
+      cardSelector: z.string().optional().describe("卡片选择器（可选）"),
+      containerSelector: z.string().optional().describe("容器选择器（可选）"),
+      pagination: z.string().optional().describe("分页配置 JSON（可选）。格式: {mode:'click'|'scroll'|'url', nextButtonSelector, maxPages, waitMs}"),
+      scriptId: z.string().optional().describe("更新已有脚本时传入其 ID，不传则创建新脚本"),
+    },
+    async ({ name, urlPatterns, code, fields, cardSelector, containerSelector, pagination, scriptId }) => {
+      const fieldsArr = JSON.parse(fields)
+      const urlPatternsArr = urlPatterns.split(",").map((s: string) => s.trim())
+      const paginationObj = pagination ? JSON.parse(pagination) : undefined
+
+      const result = await bridge.sendRequest("script_save", {
+        scriptId,
+        name,
+        urlPatterns: urlPatternsArr,
+        code,
+        fields: fieldsArr,
+        cardSelector,
+        containerSelector,
+        pagination: paginationObj,
+      })
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] }
+    }
+  )
+
+  // 8. 按名称或 ID 执行已保存的脚本
+  server.tool(
+    "script_execute",
+    "执行已保存的提取脚本。可按名称或 ID 查找脚本，在当前页面执行提取。",
+    {
+      scriptName: z.string().optional().describe("脚本名称（模糊匹配）"),
+      scriptId: z.string().optional().describe("脚本 ID（精确匹配）"),
+    },
+    async ({ scriptName, scriptId }) => {
+      if (!scriptId && !scriptName) {
+        return { content: [{ type: "text" as const, text: "错误：必须提供 scriptName 或 scriptId" }] }
+      }
+      const result = await bridge.sendRequest("script_execute", { scriptName, scriptId })
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: typeof result === "string" ? result : JSON.stringify(result, null, 2),
+          },
+        ],
+      }
+    }
+  )
+
+  // 9. 删除脚本
+  server.tool(
+    "script_delete",
+    "删除已保存的提取脚本。可按名称或 ID 查找并删除。",
+    {
+      scriptId: z.string().optional().describe("脚本 ID（精确匹配）"),
+      scriptName: z.string().optional().describe("脚本名称（模糊匹配，会删除所有匹配的脚本）"),
+    },
+    async ({ scriptId, scriptName }) => {
+      if (!scriptId && !scriptName) {
+        return { content: [{ type: "text" as const, text: "错误：必须提供 scriptName 或 scriptId" }] }
+      }
+      const result = await bridge.sendRequest("script_delete", { scriptId, scriptName })
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] }
+    }
+  )
+
+  // 10. 分页提取数据
+  server.tool(
+    "browser_execute_paginated",
+    "分页提取数据：重复执行提取脚本直到翻页失败或达到最大页数。支持 click/numbered/scroll/url 四种翻页模式。",
+    {
+      code: z.string().describe("提取代码，必须包含 return 语句返回数组"),
+      pagination: z.string().describe("分页配置 JSON: {mode:'click'|'numbered'|'scroll'|'url', nextButtonSelector?, pageButtonSelector?, maxPages, waitMs?}"),
+    },
+    async ({ code, pagination }) => {
+      const paginationObj = JSON.parse(pagination)
+      const result = await bridge.sendRequest("execute_paginated", {
+        code,
+        pagination: paginationObj,
+      })
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: typeof result === "string" ? result : JSON.stringify(result, null, 2),
+          },
+        ],
+      }
+    }
+  )
+
+  // 11. 让用户在页面上选择元素
+  server.tool(
+    "browser_pick_element",
+    "让用户在浏览器页面上选择一个元素，返回元素的 DOM 信息（选择器、HTML、上下文等）。可用于让用户选中卡片区域或分页按钮。",
+    {
+      prompt: z.string().optional().describe("提示用户选什么（如'请选中分页按钮区域'）"),
+    },
+    async ({ prompt }) => {
+      const result = await bridge.sendRequest("pick_element", { prompt }, 60_000)
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] }
+    }
+  )
+
+  // 12. 检查连接状态
   server.tool(
     "browser_ping",
     "检查与 Chrome Extension 的连接状态，返回 Bridge 和 Extension 的连接信息",

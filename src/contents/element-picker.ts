@@ -83,6 +83,51 @@ function getNthChildPath(el: Element): string {
 // --- 富 DOM 序列化 ---
 
 const MAX_HTML_LENGTH = 4000
+const MAX_PAGINATION_HTML_LENGTH = 2000
+const MAX_SIBLING_HTML_LENGTH = 1500
+const MAX_SIBLING_SAMPLES = 3
+
+// 自动检测页面分页区域
+function detectPaginationArea(): string | null {
+  const paginationSelectors = [
+    "nav",
+    '[role="navigation"]',
+    ".pagination",
+    ".pager",
+    ".page-nav",
+    '[class*="pagination"]',
+    '[class*="pager"]',
+    "ul.page-numbers",
+    ".pages",
+    ".page-list",
+    ".pageination",
+  ]
+
+  for (const sel of paginationSelectors) {
+    try {
+      const elements = document.querySelectorAll(sel)
+      for (const el of elements) {
+        // 检查是否包含链接或按钮（分页区域的特征）
+        const hasLinks = el.querySelectorAll("a, button").length >= 2
+        // 检查是否包含数字文本（页码特征）
+        const hasNumberText = /[2-9]|\d{2,}/.test(el.textContent || "")
+        if (hasLinks && hasNumberText) {
+          const clone = el.cloneNode(true) as Element
+          clone.querySelectorAll("script, style, svg").forEach((n) => n.remove())
+          let html = clone.outerHTML
+          if (html.length > MAX_PAGINATION_HTML_LENGTH) {
+            html = html.slice(0, MAX_PAGINATION_HTML_LENGTH) + "\n<!-- ... 截断 ... -->"
+          }
+          return html
+        }
+      }
+    } catch {
+      // 无效选择器，跳过
+    }
+  }
+
+  return null
+}
 
 // 获取元素的通用选择器（不含 nth-child），用于计算同级元素
 function getGenericSelector(el: Element): string {
@@ -120,6 +165,30 @@ function serializeElement(el: Element): string {
   }
 
   return html
+}
+
+// 捕获同级卡片样本（最多 3 个，供 AI 分析 DOM 变化）
+function captureSiblingSamples(el: Element): string[] {
+  const parent = el.parentElement
+  if (!parent) return []
+
+  const genericSelector = getGenericSelector(el)
+  const siblings = parent.querySelectorAll(`:scope > ${genericSelector}`)
+
+  const samples: string[] = []
+  for (let i = 0; i < siblings.length && samples.length < MAX_SIBLING_SAMPLES; i++) {
+    const sibling = siblings[i]
+    // 跳过被选中的元素本身
+    if (sibling === el) continue
+    const clone = sibling.cloneNode(true) as Element
+    clone.querySelectorAll("script, style, svg").forEach((n) => n.remove())
+    let html = clone.outerHTML
+    if (html.length > MAX_SIBLING_HTML_LENGTH) {
+      html = html.slice(0, MAX_SIBLING_HTML_LENGTH) + "\n<!-- ... 截断 ... -->"
+    }
+    samples.push(html)
+  }
+  return samples
 }
 
 // 检测同级同类元素
@@ -176,6 +245,8 @@ function onClick(e: MouseEvent) {
   // 富 DOM 捕获
   const outerHTML = serializeElement(target)
   const { siblingCount, parentContext } = detectSiblings(target)
+  const paginationContext = detectPaginationArea()
+  const siblingSamples = captureSiblingSamples(target)
 
   const capture: ElementCapture = {
     selector,
@@ -184,6 +255,8 @@ function onClick(e: MouseEvent) {
     outerHTML,
     parentContext,
     siblingCount,
+    ...(paginationContext && { paginationContext }),
+    ...(siblingSamples.length > 0 && { siblingSamples }),
   }
 
   chrome.runtime.sendMessage({
@@ -208,10 +281,15 @@ function stopPicker() {
   document.removeEventListener("click", onClick, true)
 }
 
-chrome.runtime.onMessage.addListener((message) => {
-  if (message.type === "START_PICKER") {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  console.log("[PagePilot Picker] 收到消息:", message.type)
+  if (message.type === "PAGEPILOT_PING") {
+    sendResponse("PAGEPILOT_PONG")
+  } else if (message.type === "START_PICKER") {
+    console.log("[PagePilot Picker] 启动选择器")
     startPicker()
   } else if (message.type === "STOP_PICKER") {
+    console.log("[PagePilot Picker] 停止选择器")
     stopPicker()
   }
 })

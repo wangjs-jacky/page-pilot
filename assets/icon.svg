@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0d0d1a"/>
+      <stop offset="100%" stop-color="#181830"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#d8d8e8"/>
+      <stop offset="40%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#b0b0c8"/>
+    </linearGradient>
+    <linearGradient id="flame" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#00ff88"/>
+      <stop offset="60%" stop-color="#00cc66"/>
+      <stop offset="100%" stop-color="#004422" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="window" cx="45%" cy="35%">
+      <stop offset="0%" stop-color="#66ffcc"/>
+      <stop offset="100%" stop-color="#0088aa"/>
+    </radialGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="12" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="bigGlow">
+      <feGaussianBlur stdDeviation="20"/>
+    </filter>
+  </defs>
+
+  <!-- 圆角背景 -->
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+
+  <!-- 火焰光晕 - 在火箭后面 -->
+  <ellipse cx="210" cy="420" rx="100" ry="60" fill="#00ff88" opacity="0.12" filter="url(#bigGlow)"/>
+
+  <!-- 火箭 - 竖直居中，撑满画布 -->
+  <g>
+    <!-- 尾翼左 -->
+    <path d="M180,380 L100,470 L170,440 L180,410 Z" fill="#1a1a3a" stroke="#2a2a50" stroke-width="2"/>
+    <!-- 尾翼右 -->
+    <path d="M332,380 L412,470 L342,440 L332,410 Z" fill="#1a1a3a" stroke="#2a2a50" stroke-width="2"/>
+
+    <!-- 火焰 -->
+    <g filter="url(#glow)">
+      <path d="M210,430 Q190,490 220,510 Q240,480 230,430 Z" fill="url(#flame)"/>
+      <path d="M282,430 Q302,490 272,510 Q252,480 262,430 Z" fill="url(#flame)"/>
+      <path d="M225,425 Q246,500 256,425 Z" fill="url(#flame)" opacity="0.8"/>
+    </g>
+
+    <!-- 火箭机身 -->
+    <path d="M180,120 Q256,20 332,120 L332,400 L180,400 Z"
+          fill="url(#body)" stroke="#c8c8dd" stroke-width="2"/>
+
+    <!-- 火箭头锥高光 -->
+    <path d="M210,120 Q256,40 280,120 Q260,100 240,100 Z" fill="white" opacity="0.25"/>
+
+    <!-- 舷窗 -->
+    <circle cx="256" cy="180" r="40" fill="url(#window)" stroke="#8899aa" stroke-width="3"/>
+    <circle cx="256" cy="180" r="26" fill="#00bbaa" opacity="0.3"/>
+    <ellipse cx="246" cy="168" rx="12" ry="8" fill="white" opacity="0.45"/>
+
+    <!-- 机身装饰条纹 -->
+    <rect x="180" y="260" width="152" height="4" rx="2" fill="#00ff88" opacity="0.5"/>
+    <rect x="180" y="274" width="152" height="2" rx="1" fill="#00ff88" opacity="0.25"/>
+
+    <!-- 机身底部渐变 -->
+    <path d="M180,350 L332,350 L332,400 L180,400 Z" fill="#b0b0c8" opacity="0.5"/>
+
+    <!-- 喷口 -->
+    <rect x="210" y="400" width="92" height="18" rx="4" fill="#2a2a4a"/>
+    <rect x="220" y="403" width="72" height="12" rx="3" fill="#1a1a35"/>
+  </g>
+</svg>

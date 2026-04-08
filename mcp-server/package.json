@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "description": "PagePilot MCP Server — Claude Code 通过此 MCP Server 控制浏览器提取网页数据",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "bin": {
     "page-pilot-mcp": "./dist/index.js"
   },

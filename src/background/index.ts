@@ -7,7 +7,9 @@ import {
   invokeSkill,
   askClaude,
 } from "../lib/mcp/ws-client"
-import type { PaginationConfig } from "../lib/types"
+import type { DryRunResult, PaginationConfig } from "../lib/types"
+import { createChromePaginationOps } from "../lib/pagination/chrome-ops"
+import { runPaginatedExtraction } from "../lib/pagination/runner"
 
 // 安装时打开设置页
 chrome.runtime.onInstalled.addListener((details) => {
@@ -88,6 +90,99 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true
   }
 
+  // Dry-Run 执行（执行代码 + 捕获 DOM 快照用于自动修复）
+  if (message.type === "DRY_RUN_EXECUTE") {
+    const { code, cardSelector, containerSelector } = message.payload
+
+    const getTabId = async (): Promise<number | null> => {
+      if (sender.tab?.id) return sender.tab.id
+      const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+      return tabs[0]?.id ?? null
+    }
+
+    getTabId().then(async (tabId) => {
+      if (!tabId) {
+        sendResponse({ success: false, error: "No tab found", itemCount: 0 } satisfies DryRunResult)
+        return
+      }
+
+      try {
+        // 1. 执行提取代码
+        const results = await chrome.scripting.executeScript({
+          target: { tabId },
+          world: "MAIN",
+          func: (code: string) => {
+            try {
+              return (0, eval)(code)
+            } catch (e: any) {
+              return { __error: e.message }
+            }
+          },
+          args: [code],
+        })
+
+        const raw = results?.[0]?.result
+
+        // 检测 eval 级别错误
+        if (raw && typeof raw === "object" && raw.__error) {
+          sendResponse({
+            success: false,
+            error: raw.__error,
+            itemCount: 0,
+          } satisfies DryRunResult)
+          return
+        }
+
+        const data = Array.isArray(raw) ? raw : raw ? [raw] : []
+
+        // 2. 如果返回空，捕获 DOM 快照供自动修复
+        let firstCardHTML: string | undefined
+        if (data.length === 0 && cardSelector) {
+          const snapshot = await chrome.scripting.executeScript({
+            target: { tabId },
+            world: "MAIN",
+            func: (selector: string) => {
+              const el = document.querySelector(selector)
+              if (!el) {
+                // 尝试找到页面上可能匹配的替代元素
+                const tag = selector.split(/[.#[\]>]/).filter(Boolean)[0] || ""
+                const alternatives = document.querySelectorAll(tag || "*")
+                return {
+                  found: false,
+                  alternativeCount: Math.min(alternatives.length, 5),
+                  firstAltHTML: alternatives[0]?.outerHTML?.slice(0, 500) || null,
+                }
+              }
+              const clone = el.cloneNode(true) as Element
+              clone.querySelectorAll("script, style, svg").forEach((n) => n.remove())
+              return {
+                found: true,
+                html: clone.outerHTML.slice(0, 1500),
+              }
+            },
+            args: [cardSelector],
+          })
+          firstCardHTML = snapshot?.[0]?.result?.html || snapshot?.[0]?.result?.firstAltHTML
+        }
+
+        sendResponse({
+          success: data.length > 0,
+          data,
+          itemCount: data.length,
+          error: data.length === 0 ? `cardSelector "${cardSelector}" matched 0 elements` : undefined,
+          firstCardHTML,
+        } satisfies DryRunResult)
+      } catch (error: any) {
+        sendResponse({
+          success: false,
+          error: error.message,
+          itemCount: 0,
+        } satisfies DryRunResult)
+      }
+    })
+    return true
+  }
+
   // 分页执行脚本
   if (message.type === "EXECUTE_PAGINATED") {
     if (paginatedExecutionRunning) {
@@ -112,7 +207,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ status: "started" })
 
       try {
-        await executePaginatedExtraction(tabId, code, pagination)
+        const result = await runPaginatedExtraction({
+          extractionCode: code,
+          pagination,
+          ops: createChromePaginationOps(tabId),
+          shouldContinue: () => paginatedExecutionRunning,
+          onProgress: async (progress) => {
+            await chrome.runtime.sendMessage({
+              type: "PAGINATED_PROGRESS",
+              payload: { ...progress, done: false },
+            }).catch(() => {})
+          },
+        })
+
+        await chrome.runtime.sendMessage({
+          type: "SCRIPT_RESULT",
+          payload: { data: result.data },
+        }).catch(() => {})
+
+        await chrome.runtime.sendMessage({
+          type: "PAGINATED_PROGRESS",
+          payload: {
+            page: result.pagesVisited,
+            maxPages: pagination.maxPages,
+            itemsSoFar: result.data.length,
+            done: true,
+            stopReason: result.stopReason,
+          },
+        }).catch(() => {})
       } catch (error: any) {
         chrome.runtime.sendMessage({
           type: "PAGINATED_PROGRESS",
@@ -150,6 +272,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return
   }
 
+  if (message.type === "MCP_AUTO_CONNECT") {
+    // 仅在未连接时尝试自动连接（Bridge 运行则连，否则静默跳过）
+    if (!isMCPConnected()) {
+      connectMCPBridge({ autoConnect: true })
+    }
+    sendResponse({ connected: isMCPConnected() })
+    return
+  }
+
   // === CC 请求（SidePanel → Background → WebSocket → Bridge → Claude CLI） ===
 
   if (message.type === "CC_LIST_SKILLS") {
@@ -173,139 +304,3 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true
   }
 })
-
-// 分页提取核心逻辑
-async function executePaginatedExtraction(
-  tabId: number,
-  extractionCode: string,
-  pagination: PaginationConfig
-) {
-  const allResults: Record<string, any>[] = []
-  let previousFirstItemSignature = ""
-
-  for (let page = 1; page <= pagination.maxPages; page++) {
-    if (!paginatedExecutionRunning) break
-
-    // 执行提取
-    const extractResults = await chrome.scripting.executeScript({
-      target: { tabId },
-      world: "MAIN",
-      func: (code: string) => {
-        try {
-          return (0, eval)(code)
-        } catch {
-          return []
-        }
-      },
-      args: [extractionCode],
-    })
-
-    const pageData = extractResults?.[0]?.result || []
-    const items = Array.isArray(pageData) ? pageData : [pageData]
-
-    // 去重检查：如果第一个元素和上次一样，说明翻页没生效
-    if (items.length > 0 && page > 1) {
-      const firstItem = items[0]
-      const signature = JSON.stringify(firstItem)
-      if (signature === previousFirstItemSignature) {
-        // 翻页未生效，停止
-        break
-      }
-    }
-
-    if (items.length > 0) {
-      previousFirstItemSignature = JSON.stringify(items[0])
-    }
-
-    allResults.push(...items)
-
-    // 发送进度
-    await chrome.runtime.sendMessage({
-      type: "PAGINATED_PROGRESS",
-      payload: { page, maxPages: pagination.maxPages, itemsSoFar: allResults.length, done: false },
-    }).catch(() => {})
-
-    // 如果不是最后一页，执行翻页
-    if (page < pagination.maxPages && items.length > 0) {
-      let pageChanged = false
-
-      if (pagination.mode === "click") {
-        // 点击下一页按钮 — 检查选择器是否有效
-        if (!pagination.nextButtonSelector?.trim()) {
-          break
-        }
-        const clickResult = await chrome.scripting.executeScript({
-          target: { tabId },
-          world: "MAIN",
-          func: (selector: string) => {
-            const btn = document.querySelector(selector) as HTMLElement | null
-            if (btn && !btn.disabled) {
-              btn.click()
-              return true
-            }
-            return false
-          },
-          args: [pagination.nextButtonSelector],
-        })
-        pageChanged = clickResult?.[0]?.result === true
-      } else if (pagination.mode === "scroll") {
-        // 滚动到底部
-        await chrome.scripting.executeScript({
-          target: { tabId },
-          world: "MAIN",
-          func: () => {
-            window.scrollTo(0, document.body.scrollHeight)
-          },
-        })
-        pageChanged = true
-      } else if (pagination.mode === "url") {
-        // URL 翻页 — 提取当前页码并递增
-        const urlResult = await chrome.scripting.executeScript({
-          target: { tabId },
-          world: "MAIN",
-          func: () => window.location.href,
-        })
-        const currentUrl = urlResult?.[0]?.result || ""
-        const pageMatch = currentUrl.match(/page=(\d+)/)
-        if (pageMatch) {
-          const currentPage = parseInt(pageMatch[1])
-          const nextUrl = currentUrl.replace(`page=${currentPage}`, `page=${currentPage + 1}`)
-          await chrome.tabs.update(tabId, { url: nextUrl })
-          // 等待页面加载
-          await new Promise<void>((resolve) => {
-            const listener = (updatedTabId: number, info: chrome.tabs.TabChangeInfo) => {
-              if (updatedTabId === tabId && info.status === "complete") {
-                chrome.tabs.onUpdated.removeListener(listener)
-                resolve()
-              }
-            }
-            chrome.tabs.onUpdated.addListener(listener)
-            // 超时保护
-            setTimeout(resolve, 10000)
-          })
-          pageChanged = true
-        }
-      }
-
-      if (!pageChanged && pagination.mode === "click") {
-        // 点击翻页失败（没有下一页按钮），停止
-        break
-      }
-
-      // 等待新内容加载
-      await new Promise((resolve) => setTimeout(resolve, pagination.waitMs))
-    }
-  }
-
-  // 发送最终结果
-  await chrome.runtime.sendMessage({
-    type: "SCRIPT_RESULT",
-    payload: { data: allResults },
-  }).catch(() => {})
-
-  // 发送完成进度
-  await chrome.runtime.sendMessage({
-    type: "PAGINATED_PROGRESS",
-    payload: { page: pagination.maxPages, maxPages: pagination.maxPages, itemsSoFar: allResults.length, done: true },
-  }).catch(() => {})
-}

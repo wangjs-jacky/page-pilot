@@ -4,13 +4,16 @@
  * 支持反向请求：向 Bridge 发送 Claude CLI 执行请求
  */
 
-import type { ClaudeCodeSkill } from "../types"
+import type { ClaudeCodeSkill, ExtractionScript, PaginationConfig } from "../types"
+import { createChromePaginationOps } from "../pagination/chrome-ops"
+import { runPaginatedExtraction } from "../pagination/runner"
 
 const WS_URL = "ws://localhost:9527"
 const RECONNECT_INTERVAL = 3000
 
 let ws: WebSocket | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+let allowReconnect = true
 
 interface BridgeMessage {
   id: string
@@ -45,20 +48,39 @@ type PendingCCRequest = {
 let ccRequestCounter = 0
 const pendingCCRequests = new Map<string, PendingCCRequest>()
 
+function rejectPendingCCRequests(error: Error) {
+  for (const [, pending] of pendingCCRequests) {
+    clearTimeout(pending.timer)
+    pending.reject(error)
+  }
+  pendingCCRequests.clear()
+}
+
 /** 连接到 MCP Bridge */
-export function connectMCPBridge() {
-  if (ws && ws.readyState === WebSocket.OPEN) return
+export function connectMCPBridge(options?: { autoConnect?: boolean }) {
+  // autoConnect 模式：初始失败不重试，成功后启用重连
+  allowReconnect = !options?.autoConnect
+
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+    return
+  }
 
   try {
     ws = new WebSocket(WS_URL)
   } catch (e) {
-    console.log("[MCP Client] WebSocket 创建失败，将在 3 秒后重试")
-    scheduleReconnect()
+    if (!options?.autoConnect) {
+      console.log("[MCP Client] WebSocket 创建失败，将在 3 秒后重试")
+    }
+    if (allowReconnect) scheduleReconnect()
     return
   }
 
   ws.onopen = () => {
+    // 连接成功后启用重连（包括 autoConnect 模式）
+    allowReconnect = true
     console.log("[MCP Client] 已连接到 MCP Bridge")
+    // 向 Bridge Server 注册为 Extension 角色
+    ws!.send(JSON.stringify({ type: "register", role: "extension" }))
     notifyConnectionStatus(true)
   }
 
@@ -85,16 +107,26 @@ export function connectMCPBridge() {
       sendResponse(msg.id, result)
     } catch (e: any) {
       console.error("[MCP Client] 处理消息失败:", e)
-      const parsed = typeof event.data === "string" ? JSON.parse(event.data) : {}
-      sendResponse(parsed.id || "unknown", null, e.message)
+      let messageId = "unknown"
+      if (typeof event.data === "string") {
+        try {
+          messageId = JSON.parse(event.data)?.id || "unknown"
+        } catch {
+          // 忽略 JSON 解析失败
+        }
+      }
+      sendResponse(messageId, null, e.message)
     }
   }
 
   ws.onclose = () => {
     console.log("[MCP Client] 连接断开")
     ws = null
+    rejectPendingCCRequests(new Error("WebSocket 连接已断开"))
     notifyConnectionStatus(false)
-    scheduleReconnect()
+    if (allowReconnect) {
+      scheduleReconnect()
+    }
   }
 
   ws.onerror = () => {
@@ -104,10 +136,15 @@ export function connectMCPBridge() {
 
 /** 断开连接 */
 export function disconnectMCPBridge() {
+  allowReconnect = false
+
   if (reconnectTimer) {
     clearTimeout(reconnectTimer)
     reconnectTimer = null
   }
+
+  rejectPendingCCRequests(new Error("WebSocket 已断开"))
+
   if (ws) {
     ws.close()
     ws = null
@@ -193,6 +230,9 @@ async function handleToolCall(tool: string, args: Record<string, any>): Promise<
     case "ping":
       return "pong"
 
+    case "script_list":
+      return await handleScriptList()
+
     case "get_url":
       return await handleGetUrl()
 
@@ -211,9 +251,39 @@ async function handleToolCall(tool: string, args: Record<string, any>): Promise<
     case "navigate":
       return await handleNavigate(args)
 
+    case "script_save":
+      return await handleScriptSave(args as any)
+
+    case "script_execute":
+      return await handleScriptExecute(args as any)
+
+    case "execute_paginated":
+      return await handleExecutePaginated(args as any)
+
+    case "script_delete":
+      return await handleScriptDelete(args as any)
+
+    case "pick_element":
+      return await handlePickElement(args as any)
+
     default:
       throw new Error(`未知工具: ${tool}`)
   }
+}
+
+async function handleScriptList(): Promise<Array<{ id: string; name: string; urlPatterns: string[]; cardSelector?: string; containerSelector?: string; fields: Array<{ name: string; selector: string; attribute: string }>; lastExecutedAt?: number }>> {
+  const SCRIPTS_KEY = "pagepilot_scripts"
+  const result = await chrome.storage.local.get(SCRIPTS_KEY)
+  const scripts: ExtractionScript[] = result[SCRIPTS_KEY] || []
+  return scripts.map((s) => ({
+    id: s.id,
+    name: s.name,
+    urlPatterns: s.urlPatterns,
+    cardSelector: s.cardSelector,
+    containerSelector: s.containerSelector,
+    fields: s.fields,
+    lastExecutedAt: s.lastExecutedAt,
+  }))
 }
 
 async function getActiveTab(): Promise<chrome.tabs.Tab> {
@@ -283,18 +353,23 @@ async function handleGetDom(args: {
       const snapshot = snapshotNode(root, maxDepth)
       return snapshot.length > maxLength ? snapshot.slice(0, maxLength) + "\n... (已截断)" : snapshot
     },
-    args: [args.selector, args.maxDepth || 5, args.maxLength || 8000],
+    args: [args.selector ?? null, args.maxDepth ?? 5, args.maxLength ?? 8000],
   })
   return results?.[0]?.result || ""
 }
 
 async function handleExecuteScript(args: { code: string }): Promise<any> {
   const tab = await getActiveTab()
+  // 用 Function 构造器支持 return 语句，间接 eval 不支持顶层 return
   const results = await chrome.scripting.executeScript({
     target: { tabId: tab.id! },
     world: "MAIN",
     func: (code: string) => {
-      return (0, eval)(code)
+      try {
+        return new Function(code)()
+      } catch (e: any) {
+        return { error: e.message }
+      }
     },
     args: [args.code],
   })
@@ -361,7 +436,7 @@ async function handleGetText(args: {
       const text = (el.textContent || "").replace(/\s+/g, " ").trim()
       return text.length > maxLength ? text.slice(0, maxLength) + "... (已截断)" : text
     },
-    args: [args.selector, args.maxLength || 5000],
+    args: [args.selector ?? null, args.maxLength ?? 5000],
   })
   return results?.[0]?.result || ""
 }
@@ -383,5 +458,376 @@ async function handleNavigate(args: { url: string }): Promise<void> {
       chrome.tabs.onUpdated.removeListener(listener)
       resolve()
     }, 10000)
+  })
+}
+
+// ========== 脚本管理工具（MCP → Extension） ==========
+
+async function handleScriptDelete(args: {
+  scriptId?: string
+  scriptName?: string
+}): Promise<{ deleted: Array<{ id: string; name: string }> }> {
+  const SCRIPTS_KEY = "pagepilot_scripts"
+  const result = await chrome.storage.local.get(SCRIPTS_KEY)
+  const scripts: ExtractionScript[] = result[SCRIPTS_KEY] || []
+
+  let toDelete: ExtractionScript[]
+
+  if (args.scriptId) {
+    toDelete = scripts.filter((s) => s.id === args.scriptId)
+  } else if (args.scriptName) {
+    // 模糊匹配：先精确匹配，再 includes 匹配
+    toDelete = scripts.filter((s) => s.name === args.scriptName)
+    if (toDelete.length === 0) {
+      toDelete = scripts.filter((s) =>
+        s.name.toLowerCase().includes(args.scriptName!.toLowerCase())
+      )
+    }
+  } else {
+    return { deleted: [] }
+  }
+
+  const deleteIds = new Set(toDelete.map((s) => s.id))
+  const remaining = scripts.filter((s) => !deleteIds.has(s.id))
+  await chrome.storage.local.set({ [SCRIPTS_KEY]: remaining })
+
+  return {
+    deleted: toDelete.map((s) => ({ id: s.id, name: s.name })),
+  }
+}
+
+async function handleScriptSave(args: {
+  scriptId?: string
+  name: string
+  urlPatterns: string[]
+  code: string
+  fields: Array<{ name: string; selector: string; attribute: string }>
+  cardSelector?: string
+  containerSelector?: string
+  pagination?: {
+    enabled?: boolean
+    mode: "click" | "numbered" | "scroll" | "url"
+    nextButtonSelector?: string
+    pageButtonSelector?: string
+    maxPages?: number
+    waitMs?: number
+  }
+}): Promise<{ id: string; name: string; action: string }> {
+  const SCRIPTS_KEY = "pagepilot_scripts"
+  const result = await chrome.storage.local.get(SCRIPTS_KEY)
+  const scripts: ExtractionScript[] = result[SCRIPTS_KEY] || []
+
+  const now = Date.now()
+
+  if (args.scriptId) {
+    // 更新已有脚本
+    const idx = scripts.findIndex((s) => s.id === args.scriptId)
+    if (idx >= 0) {
+      scripts[idx] = {
+        ...scripts[idx],
+        name: args.name,
+        urlPatterns: args.urlPatterns,
+        code: args.code,
+        fields: args.fields,
+        cardSelector: args.cardSelector,
+        containerSelector: args.containerSelector,
+        pagination: args.pagination
+          ? ({ enabled: true, ...args.pagination } as PaginationConfig)
+          : undefined,
+      }
+      await chrome.storage.local.set({ [SCRIPTS_KEY]: scripts })
+      return { id: scripts[idx].id, name: args.name, action: "updated" }
+    }
+  }
+
+  // 创建新脚本
+  const newScript: ExtractionScript = {
+    id: crypto.randomUUID(),
+    name: args.name,
+    urlPatterns: args.urlPatterns,
+    code: args.code,
+    fields: args.fields,
+    cardSelector: args.cardSelector,
+    containerSelector: args.containerSelector,
+    pagination: args.pagination
+      ? ({ enabled: true, ...args.pagination } as PaginationConfig)
+      : undefined,
+    createdAt: now,
+  }
+  scripts.push(newScript)
+  await chrome.storage.local.set({ [SCRIPTS_KEY]: scripts })
+  return { id: newScript.id, name: args.name, action: "created" }
+}
+
+async function handleScriptExecute(args: {
+  scriptId?: string
+  scriptName?: string
+}): Promise<any> {
+  const SCRIPTS_KEY = "pagepilot_scripts"
+  const result = await chrome.storage.local.get(SCRIPTS_KEY)
+  const scripts: ExtractionScript[] = result[SCRIPTS_KEY] || []
+
+  let script: ExtractionScript | undefined
+
+  if (args.scriptId) {
+    script = scripts.find((s) => s.id === args.scriptId)
+  } else if (args.scriptName) {
+    // 模糊匹配：先精确匹配，再 includes 匹配
+    script = scripts.find((s) => s.name === args.scriptName)
+    if (!script) {
+      script = scripts.find((s) =>
+        s.name.toLowerCase().includes(args.scriptName!.toLowerCase())
+      )
+    }
+  }
+
+  if (!script) {
+    throw new Error(
+      `未找到脚本: ${args.scriptId || args.scriptName}。可用脚本: ${scripts.map((s) => s.name).join(", ")}`
+    )
+  }
+
+  const tab = await getActiveTab()
+
+  // 更新最后执行时间
+  const idx = scripts.findIndex((s) => s.id === script!.id)
+  if (idx >= 0) {
+    scripts[idx].lastExecutedAt = Date.now()
+    await chrome.storage.local.set({ [SCRIPTS_KEY]: scripts })
+  }
+
+  // 如果有分页配置，执行分页提取
+  if (script.pagination?.enabled) {
+    return await executePaginatedFromMCP(
+      tab.id!,
+      script.code,
+      script.pagination
+    )
+  }
+
+  // 单页执行脚本
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id! },
+    world: "MAIN",
+    func: (code: string) => {
+      try {
+        return (0, eval)(code)
+      } catch (e: any) {
+        return { error: e.message }
+      }
+    },
+    args: [script.code],
+  })
+
+  return results?.[0]?.result
+}
+
+async function handleExecutePaginated(args: {
+  code: string
+  pagination: {
+    mode: "click" | "numbered" | "scroll" | "url"
+    nextButtonSelector?: string
+    pageButtonSelector?: string
+    maxPages?: number
+    waitMs?: number
+  }
+}): Promise<any> {
+  const tab = await getActiveTab()
+
+  const paginationConfig: PaginationConfig = {
+    enabled: true,
+    mode: args.pagination.mode,
+    nextButtonSelector: args.pagination.nextButtonSelector || "",
+    pageButtonSelector: args.pagination.pageButtonSelector,
+    maxPages: args.pagination.maxPages || 5,
+    waitMs: args.pagination.waitMs || 2000,
+  }
+
+  return await executePaginatedFromMCP(tab.id!, args.code, paginationConfig)
+}
+
+/**
+ * 分页提取核心逻辑（MCP 版本）— 结果直接回传 Bridge，不推 SidePanel
+ */
+async function executePaginatedFromMCP(
+  tabId: number,
+  extractionCode: string,
+  pagination: PaginationConfig
+): Promise<{ totalItems: number; pages: number; data: Record<string, any>[] }> {
+  const result = await runPaginatedExtraction({
+    extractionCode,
+    pagination,
+    ops: createChromePaginationOps(tabId),
+  })
+
+  return {
+    totalItems: result.data.length,
+    pages: result.pagesVisited,
+    data: result.data,
+  }
+}
+
+// ========== 元素选择工具（MCP → Extension → 用户交互 → 回传） ==========
+
+async function handlePickElement(args: { prompt?: string }): Promise<any> {
+  const tab = await getActiveTab()
+  if (!tab?.id) throw new Error("没有活跃的标签页")
+
+  console.log("[MCP pick_element] 在 tab", tab.id, tab.url, "启动选择器")
+
+  // MCP 模式下统一使用 executeScript 路径，绕过 Content Script 消息路由的不可靠性
+  // （Content Script 在扩展重载后监听器会失效，而 sendMessage 不报错）
+  console.log("[MCP pick_element] 使用 executeScript 路径")
+
+  // 用 executeScript 在 MAIN world 注入选择器逻辑
+  // 用户点击后将结果存到 DOM 中，Background 通过轮询读取
+
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id! },
+    world: "MAIN",
+    func: (promptText: string | null) => {
+      // 清理之前的选择器
+      const prevResult = document.getElementById("__pagepilot_pick_result")
+      if (prevResult) prevResult.remove()
+
+      // 注入样式
+      let style = document.getElementById("pagepilot-highlight-style") as HTMLStyleElement
+      if (!style) {
+        style = document.createElement("style")
+        style.id = "pagepilot-highlight-style"
+        document.head.appendChild(style)
+      }
+      style.textContent = `.pagepilot-highlight { outline: 2px solid #00d4ff !important; outline-offset: 2px !important; background-color: rgba(0, 212, 255, 0.1) !important; cursor: crosshair !important; }`
+
+      // 提示浮层
+      let banner = document.getElementById("__pagepilot_pick_banner") as HTMLDivElement
+      if (banner) banner.remove()
+      banner = document.createElement("div")
+      banner.id = "__pagepilot_pick_banner"
+      banner.textContent = promptText || "请点击选中一个元素"
+      Object.assign(banner.style, {
+        position: "fixed", top: "0", left: "0", right: "0", zIndex: "2147483647",
+        padding: "8px 16px", background: "#00d4ff", color: "#000", fontWeight: "bold",
+        fontSize: "14px", textAlign: "center", fontFamily: "system-ui, sans-serif",
+      })
+      document.body.appendChild(banner)
+
+      let hoveredEl: Element | null = null
+      const onOver = (e: MouseEvent) => {
+        const t = e.target as Element
+        if (t === document.body || t === document.documentElement || t.id?.startsWith("__pagepilot")) return
+        if (hoveredEl) hoveredEl.classList.remove("pagepilot-highlight")
+        hoveredEl = t
+        t.classList.add("pagepilot-highlight")
+      }
+      const onClick = (e: MouseEvent) => {
+        e.preventDefault()
+        e.stopPropagation()
+        const t = e.target as Element
+
+        // 先移除高亮类再计算选择器和序列化
+        t.classList.remove("pagepilot-highlight")
+
+        // 计算选择器
+        const calcSelector = (el: Element): string => {
+          if (el.id && !el.id.startsWith("__pagepilot")) return `#${CSS.escape(el.id)}`
+          const tag = el.tagName.toLowerCase()
+          const classes = Array.from(el.classList).filter(
+            (c) => c !== "pagepilot-highlight" && !c.startsWith("css-") && !c.startsWith("sc-") && !c.startsWith("_") && !c.startsWith("data-v-")
+          )
+          if (classes.length > 0) {
+            const sel = `${tag}.${classes.map((c) => CSS.escape(c)).join(".")}`
+            if (el.parentElement && el.parentElement.querySelectorAll(sel).length === 1) return sel
+          }
+          const parts: string[] = []
+          let cur: Element | null = el
+          while (cur && cur !== document.body && cur !== document.documentElement) {
+            const t2 = cur.tagName.toLowerCase()
+            const idx = Array.from(cur.parentElement!.children).indexOf(cur) + 1
+            parts.unshift(`${t2}:nth-child(${idx})`)
+            cur = cur.parentElement
+          }
+          return parts.join(" > ")
+        }
+
+        const selector = calcSelector(t)
+        const cleanHtml = ((): string => {
+          const c = t.cloneNode(true) as Element
+          c.querySelectorAll("script, style, svg").forEach((n) => n.remove())
+          let h = c.outerHTML
+          if (h.length > 4000) h = h.slice(0, 4000) + "\n<!-- ... 截断 ... -->"
+          return h
+        })()
+
+        // 写入 DOM 作为结果传递通道
+        const resultEl = document.createElement("div")
+        resultEl.id = "__pagepilot_pick_result"
+        resultEl.style.display = "none"
+        resultEl.textContent = JSON.stringify({
+          selector,
+          tagName: t.tagName.toLowerCase(),
+          text: t.textContent?.trim().slice(0, 50) || "",
+          outerHTML: cleanHtml,
+        })
+        document.body.appendChild(resultEl)
+
+        // 清理
+        if (hoveredEl) hoveredEl.classList.remove("pagepilot-highlight")
+        document.removeEventListener("mouseover", onOver, true)
+        document.removeEventListener("click", onClick, true)
+        banner.remove()
+      }
+      document.addEventListener("mouseover", onOver, true)
+      document.addEventListener("click", onClick, true)
+    },
+    args: [args.prompt ?? null],
+  })
+
+  // 轮询 DOM 中的结果，最多 60s
+  return new Promise((resolve, reject) => {
+    const startTime = Date.now()
+    const poll = async () => {
+      if (Date.now() - startTime > 60_000) {
+        // 清理
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id! },
+          world: "MAIN",
+          func: () => {
+            document.getElementById("__pagepilot_pick_banner")?.remove()
+            document.getElementById("__pagepilot_pick_result")?.remove()
+          },
+          args: [],
+        })
+        reject(new Error("元素选择超时（60s）"))
+        return
+      }
+      try {
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id! },
+          world: "MAIN",
+          func: () => {
+            const el = document.getElementById("__pagepilot_pick_result")
+            return el ? el.textContent : null
+          },
+          args: [],
+        })
+        const data = results?.[0]?.result
+        if (data) {
+          // 清理结果标记
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id! },
+            world: "MAIN",
+            func: () => { document.getElementById("__pagepilot_pick_result")?.remove() },
+            args: [],
+          })
+          resolve(JSON.parse(data))
+          return
+        }
+      } catch {
+        // 轮询失败，继续
+      }
+      setTimeout(poll, 500)
+    }
+    poll()
   })
 }

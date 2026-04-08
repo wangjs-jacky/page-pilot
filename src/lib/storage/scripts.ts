@@ -23,6 +23,20 @@ export async function saveScript(script: ExtractionScript): Promise<void> {
   await chrome.storage.local.set({ [SCRIPTS_KEY]: scripts })
 }
 
+export async function duplicateScript(id: string): Promise<ExtractionScript | null> {
+  const script = await getScript(id)
+  if (!script) return null
+  const dup: ExtractionScript = {
+    ...script,
+    id: crypto.randomUUID(),
+    name: `${script.name} (副本)`,
+    createdAt: Date.now(),
+    lastExecutedAt: undefined,
+  }
+  await saveScript(dup)
+  return dup
+}
+
 export async function deleteScript(id: string): Promise<void> {
   const scripts = await getAllScripts()
   const filtered = scripts.filter((s) => s.id !== id)

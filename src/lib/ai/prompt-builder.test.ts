@@ -104,7 +104,7 @@ describe("Prompt Builder", () => {
     it("system prompt 包含代码生成规则", () => {
       const { systemPrompt } = buildSmartCodePrompt(mockFields, ".card", ".list")
       expect(systemPrompt).toContain("querySelectorAll")
-      expect(systemPrompt).toContain("MAIN world")
+      expect(systemPrompt).toContain("(0, eval)(code)")
     })
   })
 
